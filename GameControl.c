@@ -13,7 +13,9 @@
 int board[SIZE][SIZE];
 int cursorX = 0, cursorY = 0;
 int currentPlayer = BLACK;
+int gameMode = 2; // 1=1인용, 2=2인용
 int lastMoveX = -1, lastMoveY = -1;
+
 void clearScreen() {
     system("cls");
 }
@@ -85,4 +87,106 @@ int placeStone(int x, int y) {
     lastMoveY = y;
     currentPlayer = (currentPlayer == BLACK) ? WHITE : BLACK;
     return 1;
+}
+
+// AI 착수 (랜덤)
+void aiMove() {
+    int x, y;
+    do {
+        x = rand() % SIZE;
+        y = rand() % SIZE;
+    } while (board[y][x] != EMPTY);
+    placeStone(x, y);
+}
+
+// 승리 체크
+int checkWin(int x, int y) {
+    int dx[] = { 1,0,1,1 };
+    int dy[] = { 0,1,1,-1 };
+    int player = board[y][x];
+
+    for (int dir = 0; dir < 4; dir++) {
+        int count = 1;
+        int nx = x + dx[dir], ny = y + dy[dir];
+        while (nx >= 0 && nx < SIZE && ny >= 0 && ny < SIZE && board[ny][nx] == player) {
+            count++; nx += dx[dir]; ny += dy[dir];
+        }
+        nx = x - dx[dir]; ny = y - dy[dir];
+        while (nx >= 0 && nx < SIZE && ny >= 0 && ny < SIZE && board[ny][nx] == player) {
+            count++; nx -= dx[dir]; ny -= dy[dir];
+        }
+        if (count >= 5) return player;
+    }
+    return 0;
+}
+
+// 메뉴 화면
+void showMenu() {
+    int choice;
+    clearScreen();
+    printf("========== 메뉴 ==========\n");
+    printf("1. 게임 저장\n");
+    printf("2. 게임 불러오기\n");
+    printf("3. 종료\n");
+    printf("---------------------------\n");
+    printf("원하는 번호를 입력하세요 : ");
+    scanf("%d", &choice);
+
+    switch (choice) {
+    case 1: printf("게임 저장 기능 선택\n"); break;
+    case 2: printf("게임 불러오기 기능 선택\n"); break;
+    case 3: printf("게임 종료 선택\n"); exit(0); break;
+    default: printf("잘못된 선택입니다.\n"); break;
+    }
+    printf("아무 키나 누르면 메뉴를 닫습니다...\n");
+    _getch();
+}
+
+// 메인 게임 루프
+void gameLoop() {
+    char key;
+    printBoard();
+
+    while (1) {
+        if (gameMode == 1 && currentPlayer == WHITE) { // AI 차례
+            aiMove();
+            printBoard();
+            if (checkWin(lastMoveX, lastMoveY) == 2) {
+                printf("백돌 승리!\n");
+                break;
+            }
+            continue;
+        }
+
+        key = _getch();
+        if (key == 'w' || key == 'a' || key == 's' || key == 'd' || key == 'W' || key == 'A' || key == 'S' || key == 'D') {
+            moveCursor(key);
+        }
+        else if (key == 'b' || key == 'B') {
+            if (placeStone(cursorX, cursorY)) {
+                printBoard();
+                int winner = checkWin(lastMoveX, lastMoveY);
+                if (winner != 0) {
+                    printf("%s 승리!\n", (winner == BLACK) ? "흑" : "백");
+                    break;
+                }
+            }
+        }
+        else if (key == 'm' || key == 'M') {
+            showMenu();
+        }
+
+        printBoard();
+    }
+}
+
+int main() {
+    srand((unsigned int)time(NULL));
+    initBoard();
+
+    printf("게임 모드 선택: 1. 1인용  2. 2인용\n");
+    scanf("%d", &gameMode);
+
+    gameLoop();
+    return 0;
 }
