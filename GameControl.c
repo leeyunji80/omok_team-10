@@ -627,7 +627,7 @@ int main() {
     }
 
 
-    printf("\n게임이 종료되었습니다. 저장하시겠습니까?\n");
+    printf("\n게임이 종료되었습니다.\n");
     SaveData currentData;
     for (int i = 0; i < SAVE_BOARD_SIZE; i++)
         for (int j = 0; j < SAVE_BOARD_SIZE; j++)
