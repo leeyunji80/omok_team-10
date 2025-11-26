@@ -216,13 +216,12 @@ void print_rankings() {
 
 #define SAVE_BOARD_SIZE 15
 #define MAX_SAVE_SLOTS 5
-#define LIST_FILENAME "save_list.txt"
 
 typedef struct {
     int board[SAVE_BOARD_SIZE][SAVE_BOARD_SIZE];
     int currentTurn;
     int gameMode;
-} R005_SaveData;
+} SaveData;
 
 void get_filename(char* buffer) {
     time_t t = time(NULL);
@@ -237,7 +236,7 @@ void manage_fifo(const char* newFilename) {
     int count = 0;
     FILE* fp;
 
-    fp = fopen(LIST_FILENAME, "r");
+    fp = fopen("save_list.txt", "r");
     if (fp != NULL) {
         while (count < MAX_SAVE_SLOTS && fscanf(fp, "%s", fileList[count]) != EOF) {
             count++;
@@ -256,7 +255,7 @@ void manage_fifo(const char* newFilename) {
     strcpy(fileList[count], newFilename);
     count++;
 
-    fp = fopen(LIST_FILENAME, "w");
+    fp = fopen("save_list.txt", "w");
     if (fp != NULL) {
         for (int i = 0; i < count; i++) {
             fprintf(fp, "%s\n", fileList[i]);
@@ -265,26 +264,26 @@ void manage_fifo(const char* newFilename) {
     }
 }
 
-void SaveGame(const R005_SaveData* data) {
+void SaveGame(const SaveData* data) {
     char filename[256];
-    _r005_get_filename(filename);
+    get_filename(filename);
 
     FILE* fp = fopen(filename, "wb");
     if (fp == NULL) {
         return;
     }
-    fwrite(data, sizeof(R005_SaveData), 1, fp);
+    fwrite(data, sizeof(SaveData), 1, fp);
     fclose(fp);
 
-    _r005_manage_fifo(filename);
+    manage_fifo(filename);
 }
 
-int LoadGame(R005_SaveData* data) {
+int LoadGame(SaveData* data) {
     char fileList[MAX_SAVE_SLOTS][256];
     int count = 0;
     FILE* fp;
 
-    fp = fopen(LIST_FILENAME, "r");
+    fp = fopen("save_list.txt", "r");
     if (fp == NULL) {
         return 0;
     }
@@ -308,13 +307,13 @@ int LoadGame(R005_SaveData* data) {
         return 0;
     }
 
-    fread(data, sizeof(R005_SaveData), 1, fp);
+    fread(data, sizeof(SaveData), 1, fp);
     fclose(fp);
 
     return 1;
 }
 
-void HandleExit(const R005_SaveData* currentData) {
+void HandleExit(const SaveData* currentData) {
     char key;
 
     printf("\n  ========================================\n");
@@ -326,7 +325,7 @@ void HandleExit(const R005_SaveData* currentData) {
 
         if (key == 'Y') {
             printf(" 예(Y)\n");
-            SaveGame_R005(currentData);
+            SaveGame(currentData);
             exit(0);
         }
         else if (key == 'N') {
@@ -336,7 +335,7 @@ void HandleExit(const R005_SaveData* currentData) {
     }
 }
 
-void ResetGame(R005_SaveData* data) {
+void ResetGame(SaveData* data) {
     for (int i = 0; i < SAVE_BOARD_SIZE; i++) {
         for (int j = 0; j < SAVE_BOARD_SIZE; j++) {
             data->board[i][j] = 0;
