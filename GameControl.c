@@ -13,7 +13,7 @@
 int board[SIZE][SIZE];
 int cursorX = 0, cursorY = 0;
 int currentPlayer = BLACK;
-int gameMode = 2; // 1=1인용, 2=2인용
+int gameMode = 0; // 1=1인용, 2=2인용
 int lastMoveX = -1, lastMoveY = -1;
 
 void clearScreen() {
@@ -117,7 +117,6 @@ int checkWin(int x, int y) {
         }
         if (count >= 5) return player;
     }
-    return 0;
 }
 
 // 메뉴 화면
@@ -144,8 +143,8 @@ void showMenu() {
 
 // 메인 게임 루프
 void gameLoop() {
-    char key;
     printBoard();
+    int key;
 
     while (1) {
         if (gameMode == 1 && currentPlayer == WHITE) { // AI 차례
@@ -184,9 +183,36 @@ int main() {
     srand((unsigned int)time(NULL));
     initBoard();
 
-    printf("게임 모드 선택: 1. 1인용  2. 2인용\n");
+    printf("\n=========시작화면=======\n");
+    printf("1. 1인용 게임 \n");
+    printf("2. 2인용 게임 \n");
+    printf("3. 게임 불러오기 \n");
+    printf("4. 랭킹 확인하기(1인용) \n");
+    printf("5. 종료\n");
+    printf("============================\n");
+    printf("메뉴 번호를 입력하세요. (1~5): ");
     scanf("%d", &gameMode);
 
-    gameLoop();
+    if(gameMode == 1){
+        gameLoop();
+    }
+    else if(gameMode == 2){
+        gameLoop();
+    }
+    else if(gameMode == 3){
+        printf("게임 불러오기 화면으로 이동합니다..");
+    }
+    else if(gameMode == 4){
+        printf("랭킹 확인 화면으로 이동합니다...");
+    }
+    else if(gameMode == 5){
+        printf("프로그램을 종료합니다...");
+        return 0;
+    }
+
+
+    printf("\n게임이 종료되었습니다. 아무 키나 누르면 콘솔이 닫힙니다...\n");
+    _getch(); 
+
     return 0;
 }
