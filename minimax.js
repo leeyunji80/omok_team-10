@@ -1,7 +1,5 @@
-// 1. Alpha-Beta Pruning 적용 Minimax 알고리즘
-// 이 함수는 재귀 호출을 통해 수를 탐색하며, alpha(최대 하한)와 beta(최소 상한) 값을 비교하여 불필요한 가지(Branch)를 잘라내어(Pruning) 연산 속도를 최적화한다.
+// Minimax 알고리즘 기반 오목 AI
 
-// gameLogic 모듈에서 필요한 함수 로드
 const {
     isValidMove,
     checkWin,
@@ -13,19 +11,17 @@ const {
 function minimax(board, depth, alpha, beta, isMaximizing, aiColor) {
     const opponent = aiColor === 'black' ? 'white' : 'black';
 
-    // 1. 기저 사례(Base Case): 깊이 제한 도달 시 보드 평가 점수 반환
+    // 깊이가 0이거나 게임이 끝난 경우
     if (depth === 0) {
         return { score: evaluateBoard(board, aiColor) };
     }
 
-    // 탐색 후보지 선정 (깊이에 따라 탐색 범위 조절)
     const possibleMoves = getPossibleMoves(board, depth > 2 ? 10 : 15);
 
     if (possibleMoves.length === 0) {
         return { score: evaluateBoard(board, aiColor) };
     }
 
-    // 2. Maximizing Player (AI 차례): 최대 점수 탐색
     if (isMaximizing) {
         let maxScore = -Infinity;
         let bestMove = null;
@@ -33,49 +29,53 @@ function minimax(board, depth, alpha, beta, isMaximizing, aiColor) {
         for (const move of possibleMoves) {
             const { row, col } = move;
 
-            board[row][col] = aiColor; // 가상 착수
+            // 착수
+            board[row][col] = aiColor;
 
-            // 즉시 승리하는 수라면 즉시 반환 (최적화)
+            // 즉시 승리하는 수인지 확인
             if (checkWin(board, row, col, aiColor)) {
                 board[row][col] = null;
                 return { score: 1000000, row, col };
             }
 
-            // 재귀 호출 (상대방 턴으로 넘김)
+            // 재귀 호출
             const result = minimax(board, depth - 1, alpha, beta, false, aiColor);
 
-            board[row][col] = null; // 착수 취소 (Backtracking)
+            // 착수 취소
+            board[row][col] = null;
 
             if (result.score > maxScore) {
                 maxScore = result.score;
                 bestMove = { row, col };
             }
-            // Alpha 값 갱신 및 Beta Cutoff
-           alpha = Math.max(alpha, result.score);
+
+            alpha = Math.max(alpha, result.score);
             if (beta <= alpha) {
-                break; // 더 이상 탐색 불필요
+                break; // Beta cutoff
             }
         }
+
         return { score: maxScore, ...bestMove };
-    }
-    // 3. Minimizing Player (상대방 차례): 최소 점수 탐색 (상대에게 유리한 수)
-    else {
+    } else {
         let minScore = Infinity;
         let bestMove = null;
 
         for (const move of possibleMoves) {
             const { row, col } = move;
 
-            board[row][col] = opponent; // 상대 가상 착수
+            // 착수
+            board[row][col] = opponent;
 
+            // 상대가 즉시 승리하는 수인지 확인
             if (checkWin(board, row, col, opponent)) {
                 board[row][col] = null;
                 return { score: -1000000, row, col };
             }
 
-            // 재귀 호출 (AI 턴으로 넘김)
+            // 재귀 호출
             const result = minimax(board, depth - 1, alpha, beta, true, aiColor);
 
+            // 착수 취소
             board[row][col] = null;
 
             if (result.score < minScore) {
@@ -83,12 +83,66 @@ function minimax(board, depth, alpha, beta, isMaximizing, aiColor) {
                 bestMove = { row, col };
             }
 
-            // Beta 값 갱신 및 Alpha Cutoff
             beta = Math.min(beta, result.score);
             if (beta <= alpha) {
-                break;
+                break; // Alpha cutoff
             }
         }
+
         return { score: minScore, ...bestMove };
     }
 }
+
+// AI의 최적 착수 찾기
+function findBestMove(board, aiColor, difficulty = 'medium') {
+    // 난이도별 깊이 설정
+    const depthMap = {
+        'easy': 2,
+        'medium': 3,
+        'hard': 4
+    };
+
+    const depth = depthMap[difficulty] || 3;
+
+    // 상대 막기 우선 확인
+    const opponent = aiColor === 'black' ? 'white' : 'black';
+    const possibleMoves = getPossibleMoves(board, 20);
+
+    // 상대의 4목을 막아야 하는 경우 찾기
+    for (const move of possibleMoves) {
+        const { row, col } = move;
+        board[row][col] = opponent;
+        if (checkWin(board, row, col, opponent)) {
+            board[row][col] = null;
+            return { row, col }; // 즉시 막기
+        }
+        board[row][col] = null;
+    }
+
+    // AI가 즉시 이길 수 있는 경우 찾기
+    for (const move of possibleMoves) {
+        const { row, col } = move;
+        board[row][col] = aiColor;
+        if (checkWin(board, row, col, aiColor)) {
+            board[row][col] = null;
+            return { row, col }; // 즉시 승리
+        }
+        board[row][col] = null;
+    }
+
+    // Minimax 알고리즘으로 최적 수 찾기
+    const result = minimax(board, depth, -Infinity, Infinity, true, aiColor);
+
+    // 초급 난이도의 경우 가끔 랜덤하게 실수
+    if (difficulty === 'easy' && Math.random() < 0.3) {
+        const randomMove = possibleMoves[Math.floor(Math.random() * Math.min(5, possibleMoves.length))];
+        return randomMove;
+    }
+
+    return { row: result.row, col: result.col };
+}
+
+module.exports = {
+    findBestMove,
+    minimax
+};
