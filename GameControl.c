@@ -153,6 +153,7 @@ int checkWin(int x, int y) {
 }
 
 /*===============랭킹 관련 함수===============*/
+
 void update_game_result(const char* nickname, int did_win) {
     cJSON* root = NULL;
     FILE* fp = NULL;
@@ -570,11 +571,7 @@ void gameLoop() {
                     if(gameMode == 1){
                         if(winner == BLACK){fflush(stdin);
                             printf("\n닉네임을 입력하세요:");
-                            fgets(player_nickname, sizeof(player_nickname),stdin);
-                            size_t len = strlen(player_nickname);
-                            if(len > 0 && player_nickname[len -1] == '\n'){
-                                player_nickname[len - 1] = '\n';
-                            }
+                            scanf("%s", player_nickname);
                             update_game_result(player_nickname, 1);
                         }
                         else update_game_result(player_nickname, 0);
