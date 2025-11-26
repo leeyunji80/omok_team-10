@@ -109,3 +109,106 @@ void update_game_result(const char* nickname, int did_win) {
     cJSON_free(json_string);
     cJSON_Delete(root);
 }
+
+void print_rankings() {
+    typedef struct {
+        char nickname[50];
+        int wins;
+        int losses;
+        double win_rate;
+    } RankPlayer;
+
+    FILE* fp = NULL;
+    char* buffer = NULL;
+    long length = 0;
+
+    if (fopen_s(&fp, "user_data.json", "r") == 0 && fp != NULL) {
+        fseek(fp, 0, SEEK_END);
+        length = ftell(fp);
+        fseek(fp, 0, SEEK_SET);
+        if (length > 0) {
+            buffer = (char*)malloc(length + 1);
+            if (buffer) {
+                fread(buffer, 1, length, fp);
+                buffer[length] = '\0';
+            }
+        }
+        fclose(fp);
+    }
+
+    if (buffer == NULL) {
+        printf("랭킹 정보가 없습니다.\n");
+        return;
+    }
+
+    cJSON* root = cJSON_Parse(buffer);
+    free(buffer);
+
+    if (root == NULL) return;
+
+    int size = cJSON_GetArraySize(root);
+    if (size == 0) {
+        cJSON_Delete(root);
+        return;
+    }
+
+    RankPlayer* players = (RankPlayer*)malloc(sizeof(RankPlayer) * size);
+    if (players == NULL) {
+        cJSON_Delete(root);
+        return;
+    }
+
+    for (int i = 0; i < size; i++) {
+        cJSON* item = cJSON_GetArrayItem(root, i);
+        cJSON* name = cJSON_GetObjectItem(item, "nickname");
+        cJSON* wins = cJSON_GetObjectItem(item, "wins");
+        cJSON* losses = cJSON_GetObjectItem(item, "losses");
+        cJSON* rate = cJSON_GetObjectItem(item, "win_rate");
+
+        if (name && wins && losses && rate) {
+            strcpy_s(players[i].nickname, sizeof(players[i].nickname), name->valuestring);
+            players[i].wins = wins->valueint;
+            players[i].losses = losses->valueint;
+            players[i].win_rate = rate->valuedouble;
+        }
+    }
+
+    for (int i = 0; i < size - 1; i++) {
+        for (int j = 0; j < size - 1 - i; j++) {
+            int swap_needed = 0;
+
+            if (players[j].win_rate < players[j + 1].win_rate) {
+                swap_needed = 1;
+            }
+            else if (players[j].win_rate == players[j + 1].win_rate) {
+                if (players[j].wins < players[j + 1].wins) {
+                    swap_needed = 1;
+                }
+            }
+
+            if (swap_needed) {
+                RankPlayer temp = players[j];
+                players[j] = players[j + 1];
+                players[j + 1] = temp;
+            }
+        }
+    }
+
+    printf("\n=== 랭킹 시스템 (상위 5명) ===\n");
+    printf("%-5s %-15s %-10s %-10s\n", "순위", "닉네임", "승률", "전적");
+    printf("-------------------------------------------\n");
+
+    int limit = (size < 5) ? size : 5;
+    for (int i = 0; i < limit; i++) {
+        printf("%-5d %-15s %-9.1f%% %d승 %d패\n",
+            i + 1,
+            players[i].nickname,
+            players[i].win_rate * 100,
+            players[i].wins,
+            players[i].losses);
+    }
+    printf("-------------------------------------------\n");
+
+    free(players);
+    cJSON_Delete(root);
+}
