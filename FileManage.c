@@ -224,7 +224,7 @@ typedef struct {
     int gameMode;
 } R005_SaveData;
 
-void _r005_get_filename(char* buffer) {
+void get_filename(char* buffer) {
     time_t t = time(NULL);
     struct tm tm = *localtime(&t);
     sprintf(buffer, "%04d%02d%02d_%02d%02d%02d.dat",
@@ -232,7 +232,7 @@ void _r005_get_filename(char* buffer) {
         tm.tm_hour, tm.tm_min, tm.tm_sec);
 }
 
-void _r005_manage_fifo(const char* newFilename) {
+void manage_fifo(const char* newFilename) {
     char fileList[MAX_SAVE_SLOTS + 1][256];
     int count = 0;
     FILE* fp;
@@ -265,7 +265,7 @@ void _r005_manage_fifo(const char* newFilename) {
     }
 }
 
-void SaveGame_R005(const R005_SaveData* data) {
+void SaveGame(const R005_SaveData* data) {
     char filename[256];
     _r005_get_filename(filename);
 
@@ -279,7 +279,7 @@ void SaveGame_R005(const R005_SaveData* data) {
     _r005_manage_fifo(filename);
 }
 
-int LoadGame_R005(R005_SaveData* data) {
+int LoadGame(R005_SaveData* data) {
     char fileList[MAX_SAVE_SLOTS][256];
     int count = 0;
     FILE* fp;
@@ -314,7 +314,7 @@ int LoadGame_R005(R005_SaveData* data) {
     return 1;
 }
 
-void HandleExit_R006(const R005_SaveData* currentData) {
+void HandleExit(const R005_SaveData* currentData) {
     char key;
 
     printf("\n  ========================================\n");
@@ -336,7 +336,7 @@ void HandleExit_R006(const R005_SaveData* currentData) {
     }
 }
 
-void ResetGame_R006(R005_SaveData* data) {
+void ResetGame(R005_SaveData* data) {
     for (int i = 0; i < SAVE_BOARD_SIZE; i++) {
         for (int j = 0; j < SAVE_BOARD_SIZE; j++) {
             data->board[i][j] = 0;
