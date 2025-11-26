@@ -1,0 +1,167 @@
+#include<stdio.h>
+
+int main() {
+	int choice=0;
+
+	while (1) {
+		printf("\n=========시작화면=======\n");
+		printf("1. 1인용 게임 \n");
+		printf("2. 2인용 게임 \n");
+		printf("3. 게임 불러오기 \n");
+		printf("4. 랭킹 확인하기(1인용) \n");
+		printf("5. 종료\n");
+		printf("============================");
+		printf("메뉴 번호를 입력하세요. (1~5): ");
+
+
+		if (choice == 1) {
+			printf("[1] 1인용 게임 화면으로 이동합니다. \n");
+		}
+		else if (choice == 2) {
+			printf("[2] 2인용 게임 화면으로 이동합니다. \n");
+		}
+		else if (choice == 3) {
+			printf("[3] 게임불러오기 화면으로 이동합니다. \n");
+		}
+		else if (choice == 4) {
+			printf("[4] 랭킹 확인 화면으로 이동합니다. \n");
+		}
+		else if (choice == 5) {
+			printf("[5] 프로그램을 종료합니다. \n");
+			break;
+		}
+		else {
+			printf("[오류] 1~5사이의 숫자를 입력하시오. \n");
+
+		}
+
+	}
+
+	#include <stdio.h>
+#include <stdlib.h>
+
+// 전역 상수 및 변수 정의 (다른 코드에서 사용될 구조)
+#define BOARD_SIZE 15
+char board[BOARD_SIZE][BOARD_SIZE];
+
+
+void initialize_board() {
+    int r, c;
+    for (r = 0; r < BOARD_SIZE; r++) {
+        for (c = 0; c < BOARD_SIZE; c++) {
+            board[r][c] = ' '; // 내부적으로 빈칸은 ' '로 저장
+        }
+    }
+}
+
+void Board() {
+    int r, c;
+    char row_label = 'A'; // 행 라벨 시작점
+
+    system("clear"); 
+
+    
+    printf("   "); 
+    for (c = 1; c <= BOARD_SIZE; c++) {
+        printf(" %2d", c); 
+    }
+    printf("\n");
+
+    
+    for (r = 0; r < BOARD_SIZE; r++) {
+        printf(" %c ", row_label + r);
+
+        for (c = 0; c < BOARD_SIZE; c++) {
+           
+            if (board[r][c] == ' ') {
+                printf("  ."); // 빈칸
+            } else {
+                printf("  %c", board[r][c]); // 돌 (x 또는 o)
+            }
+        }
+        printf("\n");
+    }
+    printf("\n");
+}
+
+int main() {
+    initialize_board();
+    board[7][7] = 'x'; // 흑돌 테스트
+    board[7][8] = 'o'; // 백돌 테스트
+    Board();
+    
+}
+int place_stone(int row, int col, char stone) {
+   
+    if (board[row][col] != ' ') {
+        printf("\n❌ 경고: 이미 돌이 놓인 칸입니다! (다시 입력해주세요)\n");
+        printf("아무 키나 눌러 계속하세요...");
+        while (getchar() != '\n');
+        getchar();
+        return 0; // 돌 놓기 실패
+    }
+    board[row][col] = stone;
+    return 1; // 돌 놓기 성공
+}
+
+void game_loop() {
+    char input;
+    int turn = 0; // 0: 흑돌('x'), 1: 백돌('o')
+
+    initialize_board(); 
+    current_row = 7; 
+    current_col = 7;
+
+    while (1) {
+        Board(); 
+        
+        char stone_type = (turn == 0) ? 'x' : 'o';
+        printf("플레이어 %c 차례입니다. 입력 (w/s/a/d/b/q): ", stone_type);
+
+     
+        if (scanf(" %c", &input) != 1) {
+            while (getchar() != '\n'); 
+            continue;
+        }
+        while (getchar() != '\n'); 
+
+        input = tolower(input);
+
+        
+        if (input == 'q') {
+            return; 
+        }
+
+        int next_row = current_row;
+        int next_col = current_col;
+        int action_performed = 0; 
+
+     
+        if (input == 'w') {
+            next_row--; 
+        } else if (input == 's') {
+            next_row++;
+        } else if (input == 'a') {
+            next_col--;
+        } else if (input == 'd') {
+            next_col++;
+        } else if (input == 'b') {
+            if (place_stone(current_row, current_col, stone_type)) {
+                turn = 1 - turn; 
+                action_performed = 1;
+            }
+        } else {
+            
+            continue;
+        }
+
+        if (input != 'b') {
+            if (next_row >= 0 && next_row < BOARD_SIZE && 
+                next_col >= 0 && next_col < BOARD_SIZE) {
+                // 범위 내라면 커서 위치 업데이트
+                current_row = next_row;
+                current_col = next_col;
+            }
+        }
+    }
+}
