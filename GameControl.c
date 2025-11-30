@@ -580,7 +580,7 @@ void showMenu() {
   }
 }
 
-AIcheckWin(int board2[BOARD_SIZE][BOARD_SIZE], int row, int col, int color){
+int AIcheckWin(int board2[BOARD_SIZE][BOARD_SIZE], int row, int col, int color){
     int dx[] = { 1, 0, 1, 1 };
     int dy[] = { 0, 1, 1, -1 };
 
@@ -957,7 +957,7 @@ void gameLoop() {
         if (gameMode == 1 && currentPlayer == WHITE) { // AI 차례
             aiMove();
             printBoard();
-            if (checkWin(lastMoveX, lastMoveY) == 2) {
+            if (checkWinGameplay(lastMoveX, lastMoveY) == 2) {
                 printf("백돌(AI) 승리!\n");
                 if(gameMode == 1)update_game_result(player_nickname,0);
                 break;
@@ -972,7 +972,7 @@ void gameLoop() {
         else if (key == 'b' || key == 'B') {
             if (placeStone(cursorX, cursorY)) {
                 printBoard();
-                int winner = checkWin(lastMoveX, lastMoveY);
+                int winner = checkWinGameplay(lastMoveX, lastMoveY);
                 if (winner != 0) {
                     printf("%s 승리! 게임이 종료되었습니다.\n", (winner == BLACK) ? "흑" : "백");
                     if(gameMode == 1){
