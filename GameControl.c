@@ -14,12 +14,24 @@
 #define EMPTY 0
 #define SAVE_BOARD_SIZE 15
 #define MAX_SAVE_SLOTS 5
+#define BOARD_SIZE SIZE
 
 typedef struct{
     int board[SAVE_BOARD_SIZE][SAVE_BOARD_SIZE];
     int currentTurn;
     int gameMode;
 } SaveData;
+
+typedef struct{
+    int score;
+    int row;
+    int col;
+}MoveResult;
+
+typedef struct{
+    int row;
+    int col;
+}Move;
 
 /*==========전역 변수 상태=============*/
 int board[SIZE][SIZE];
@@ -36,7 +48,7 @@ void printBoard(void);
 void moveCursor(char key);
 int placeStone(int x, int y);
 void aiMove(void);
-int checkWin(int x, int y);
+int checkWinGameplay(int x, int y);
 void showMenu(void);
 void gameLoop(void);
 void SaveGame(const SaveData* data);
@@ -132,7 +144,7 @@ void aiMove() {
 }
 
 // 승리 체크
-int checkWin(int x, int y) {
+int checkWinGameplay(int x, int y) {
     int dx[] = { 1,0,1,1 };
     int dy[] = { 0,1,1,-1 };
     int player = board[y][x];
@@ -567,7 +579,7 @@ void gameLoop() {
                 printBoard();
                 int winner = checkWin(lastMoveX, lastMoveY);
                 if (winner != 0) {
-                    printf("%s 승리!\n", (winner == BLACK) ? "흑" : "백");
+                    printf("%s 승리! 게임이 종료되었습니다.\n", (winner == BLACK) ? "흑" : "백");
                     if(gameMode == 1){
                         if(winner == BLACK){fflush(stdin);
                             printf("\n닉네임을 입력하세요:");
@@ -625,9 +637,6 @@ int main() {
         printf("프로그램을 종료합니다...");
         return 0;
     }
-
-
-    printf("\n게임이 종료되었습니다.\n");
     SaveData currentData;
     for (int i = 0; i < SAVE_BOARD_SIZE; i++)
         for (int j = 0; j < SAVE_BOARD_SIZE; j++)
