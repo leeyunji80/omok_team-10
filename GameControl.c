@@ -959,7 +959,12 @@ void gameLoop() {
             printBoard();
             if (checkWinGameplay(lastMoveX, lastMoveY) == 2) {
                 printf("백돌(AI) 승리!\n");
-                if(gameMode == 1)update_game_result(player_nickname,0);
+                if(gameMode == 1){
+                    fflush(stdin);
+                    printf("\n닉네임을 입력하세요:");
+					scanf("%s", player_nickname);
+                    update_game_result(player_nickname,0);
+                }
                 break;
             }
             continue;
