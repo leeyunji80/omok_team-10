@@ -15,6 +15,7 @@
 #define SAVE_BOARD_SIZE 15
 #define MAX_SAVE_SLOTS 5
 #define BOARD_SIZE SIZE
+#define MAX_MOVES 225
 
 typedef struct{
     int board[SAVE_BOARD_SIZE][SAVE_BOARD_SIZE];
@@ -32,6 +33,12 @@ typedef struct{
     int row;
     int col;
 }Move;
+
+typedef struct {
+    int row;
+    int col;
+    int priority;
+} CandidateMove;
 
 /*==========전역 변수 상태=============*/
 int board[SIZE][SIZE];
@@ -60,6 +67,18 @@ void ResetGame(SaveData* data);
 void update_game_result(const char* nickname, int did_win);
 void print_rankings(void);
 int AIcheckWin(int board2[BOARD_SIZE][BOARD_SIZE], int row, int col, int color);
+int evaluateBoard(int board2[BOARD_SIZE][BOARD_SIZE], int aiColor);
+int getPossibleMoves(int board2[BOARD_SIZE][BOARD_SIZE], Move moves[], int maxCount);
+MoveResult minimax(int board2[BOARD_SIZE][BOARD_SIZE], int depth, int alpha, int beta, int isMaximizing, int aiColor);
+Move findBestMove(int board2[BOARD_SIZE][BOARD_SIZE], int aiColor, int difficulty);
+int countLine(int board2[BOARD_SIZE][BOARD_SIZE], int row, int col, int dx, int dy, int color);
+int evaluateLine(int board2[BOARD_SIZE][BOARD_SIZE], int row, int col, int dx, int dy, int color);
+int evaluateBoard(int board2[BOARD_SIZE][BOARD_SIZE], int aiColor);
+int manhattanDistance(int r1, int c1, int r2, int c2);
+int compareCandidates(const void* a, const void* b);
+int getPossibleMoves(int board2[BOARD_SIZE][BOARD_SIZE], Move moves[], int maxCount);
+
+
 
 void clearScreen() {
     system("cls");
@@ -134,7 +153,6 @@ int placeStone(int x, int y) {
     return 1;
 }
 
-// AI 착수 (랜덤)
 void aiMove() {
     int x, y;
     do {
@@ -576,6 +594,350 @@ AIcheckWin(int board2[BOARD_SIZE][BOARD_SIZE], int row, int col, int color){
      if (count >= 5) return color;
  }
  return 0;
+}
+
+int countLine(int board2[BOARD_SIZE][BOARD_SIZE], int row, int col, int dx, int dy, int color) {
+    int count = 0;
+    int r = row, c = col;
+
+    while (r >= 0 && r < BOARD_SIZE && c >= 0 && c < BOARD_SIZE && board2[r][c] == color) {
+        count++;
+        r += dx;
+        c += dy;
+    }
+
+    return count;
+}
+
+int evaluateLine(int board2[BOARD_SIZE][BOARD_SIZE], int row, int col, int dx, int dy, int color) {
+    int count = 1;
+    int openEnds = 0;
+
+    int r = row + dx, c = col + dy;
+    while (r >= 0 && r < BOARD_SIZE && c >= 0 && c < BOARD_SIZE && board2[r][c] == color) {
+        count++;
+        r += dx;
+        c += dy;
+    }
+    if (r >= 0 && r < BOARD_SIZE && c >= 0 && c < BOARD_SIZE && board2[r][c] == EMPTY) {
+        openEnds++;
+    }
+
+    r = row - dx; c = col - dy;
+    while (r >= 0 && r < BOARD_SIZE && c >= 0 && c < BOARD_SIZE && board2[r][c] == color) {
+        count++;
+        r -= dx;
+        c -= dy;
+    }
+    if (r >= 0 && r < BOARD_SIZE && c >= 0 && c < BOARD_SIZE && board2[r][c] == EMPTY) {
+        openEnds++;
+    }
+    if (count >= 5) return 100000;
+    if (count == 4) {
+        if (openEnds == 2) return 10000;
+        if (openEnds == 1) return 1000;
+    }
+    if (count == 3) {
+        if (openEnds == 2) return 500;
+        if (openEnds == 1) return 100;
+    }
+    if (count == 2) {
+        if (openEnds == 2) return 50;
+        if (openEnds == 1) return 10;
+    }
+
+    return 0;
+}
+
+int evaluateBoard(int board2[BOARD_SIZE][BOARD_SIZE], int aiColor) {
+    int score = 0;
+    int opponent = (aiColor == BLACK) ? WHITE : BLACK;
+
+    // 네 방향: 가로, 세로, 대각선(\), 대각선(/)
+    int directions[4][2] = { {0, 1}, {1, 0}, {1, 1}, {1, -1} };
+
+    // 모든 돌이 놓인 위치를 평가
+    for (int row = 0; row < BOARD_SIZE; row++) {
+        for (int col = 0; col < BOARD_SIZE; col++) {
+            if (board2[row][col] == aiColor) {
+                // AI 돌의 패턴 평가 (양수 점수)
+                for (int dir = 0; dir < 4; dir++) {
+                    score += evaluateLine(board2, row, col, directions[dir][0], directions[dir][1], aiColor);
+                }
+            }
+            else if (board2[row][col] == opponent) {
+                // 상대 돌의 패턴 평가 (음수 점수)
+                for (int dir = 0; dir < 4; dir++) {
+                    score -= evaluateLine(board2, row, col, directions[dir][0], directions[dir][1], opponent);
+                }
+            }
+        }
+    }
+
+    return score;
+}
+
+int manhattanDistance(int r1, int c1, int r2, int c2) {
+    int dr = (r1 > r2) ? (r1 - r2) : (r2 - r1);
+    int dc = (c1 > c2) ? (c1 - c2) : (c2 - c1);
+    return dr + dc;
+}
+
+int compareCandidates(const void* a, const void* b) {
+    CandidateMove* moveA = (CandidateMove*)a;
+    CandidateMove* moveB = (CandidateMove*)b;
+    return moveB->priority - moveA->priority;
+}
+
+int getPossibleMoves(int board2[BOARD_SIZE][BOARD_SIZE], Move moves[], int maxCount) {
+    CandidateMove candidates[BOARD_SIZE * BOARD_SIZE];
+    int candidateCount = 0;
+    int hasStone = 0;
+
+    // 보드에 돌이 있는지 확인
+    for (int r = 0; r < BOARD_SIZE; r++) {
+        for (int c = 0; c < BOARD_SIZE; c++) {
+            if (board2[r][c] != EMPTY) {
+                hasStone = 1;
+                break;
+            }
+        }
+        if (hasStone) break;
+    }
+
+    // 보드가 비어있으면 중앙 위치 반환
+    if (!hasStone) {
+        moves[0].row = BOARD_SIZE / 2;
+        moves[0].col = BOARD_SIZE / 2;
+        return 1;
+    }
+
+    // 각 빈 칸에 대해 우선순위 계산
+    for (int row = 0; row < BOARD_SIZE; row++) {
+        for (int col = 0; col < BOARD_SIZE; col++) {
+            if (board2[row][col] == EMPTY) {
+                int priority = 0;
+                int hasNearbyStone = 0;
+
+                // 주변 2칸 이내에 돌이 있는지 확인
+                for (int dr = -2; dr <= 2; dr++) {
+                    for (int dc = -2; dc <= 2; dc++) {
+                        int r = row + dr;
+                        int c = col + dc;
+
+                        if (r >= 0 && r < BOARD_SIZE && c >= 0 && c < BOARD_SIZE) {
+                            if (board2[r][c] != EMPTY) {
+                                hasNearbyStone = 1;
+                                // 거리가 가까울수록 높은 우선순위
+                                int dist = (dr * dr + dc * dc);
+                                priority += (10 - dist);
+                            }
+                        }
+                    }
+                }
+
+                // 주변에 돌이 있는 경우만 후보로 추가
+                if (hasNearbyStone) {
+                    candidates[candidateCount].row = row;
+                    candidates[candidateCount].col = col;
+                    candidates[candidateCount].priority = priority;
+                    candidateCount++;
+                }
+            }
+        }
+    }
+
+    // 후보가 없으면 모든 빈 칸을 후보로
+    if (candidateCount == 0) {
+        for (int row = 0; row < BOARD_SIZE; row++) {
+            for (int col = 0; col < BOARD_SIZE; col++) {
+                if (board2[row][col] == EMPTY) {
+                    candidates[candidateCount].row = row;
+                    candidates[candidateCount].col = col;
+                    candidates[candidateCount].priority = 0;
+                    candidateCount++;
+                }
+            }
+        }
+    }
+
+    // 우선순위로 정렬
+    qsort(candidates, candidateCount, sizeof(CandidateMove), compareCandidates);
+
+    // maxCount만큼만 반환
+    int returnCount = (candidateCount < maxCount) ? candidateCount : maxCount;
+    for (int i = 0; i < returnCount; i++) {
+        moves[i].row = candidates[i].row;
+        moves[i].col = candidates[i].col;
+    }
+
+    return returnCount;
+}
+
+MoveResult minimax(int board2[BOARD_SIZE][BOARD_SIZE], int depth, int alpha, int beta, int isMaximizing, int aiColor) {
+    int opponent = (aiColor == BLACK) ? WHITE : BLACK;
+    MoveResult result = { 0, -1, -1 };
+
+    // 깊이가 0이면 보드 평가 점수 반환
+    if (depth == 0) {
+        result.score = evaluateBoard(board2, aiColor);
+        return result;
+    }
+
+    // 탐색 후보 수 가져오기
+    Move possibleMoves[MAX_MOVES];
+    int moveCount = getPossibleMoves(board2, possibleMoves, (depth > 2) ? 10 : 15);
+
+    if (moveCount == 0) {
+        result.score = evaluateBoard(board2, aiColor);
+        return result;
+    }
+
+    if (isMaximizing) {
+        int maxScore = INT_MIN;
+        int bestRow = -1, bestCol = -1;
+
+        for (int i = 0; i < moveCount; i++) {
+            int row = possibleMoves[i].row;
+            int col = possibleMoves[i].col;
+
+            // 착수
+            board2[row][col] = aiColor;
+
+            // 즉시 승리하는 수인지 확인 (AI용 checkwin)
+            if (AIcheckWin(board2, row, col, aiColor)) {
+                board2[row][col] = EMPTY;
+                result.score = 1000000;
+                result.row = row;
+                result.col = col;
+                return result;
+            }
+
+            // 재귀 호출
+            MoveResult childResult = minimax(board2, depth - 1, alpha, beta, 0, aiColor);
+
+            // 착수 취소
+            board2[row][col] = EMPTY;
+
+            if (childResult.score > maxScore) {
+                maxScore = childResult.score;
+                bestRow = row;
+                bestCol = col;
+            }
+
+            if (maxScore > alpha) {
+                alpha = maxScore;
+            }
+            if (beta <= alpha) {
+                break; // Beta cutoff
+            }
+        }
+
+        result.score = maxScore;
+        result.row = bestRow;
+        result.col = bestCol;
+        return result;
+
+    }
+    else {
+        int minScore = INT_MAX;
+        int bestRow = -1, bestCol = -1;
+
+        for (int i = 0; i < moveCount; i++) {
+            int row = possibleMoves[i].row;
+            int col = possibleMoves[i].col;
+
+            // 착수 (상대 색)
+            board2[row][col] = opponent;
+
+            // 상대가 즉시 승리하는 수인지 확인
+            if (AIcheckWin(board2, row, col, opponent)) {
+                board2[row][col] = EMPTY;
+                result.score = -1000000;
+                result.row = row;
+                result.col = col;
+                return result;
+            }
+
+            // 재귀 호출
+            MoveResult childResult = minimax(board2, depth - 1, alpha, beta, 1, aiColor);
+
+            // 착수 취소
+            board2[row][col] = EMPTY;
+
+            if (childResult.score < minScore) {
+                minScore = childResult.score;
+                bestRow = row;
+                bestCol = col;
+            }
+
+            if (minScore < beta) {
+                beta = minScore;
+            }
+            if (beta <= alpha) {
+                break; // Alpha cutoff
+            }
+        }
+
+        result.score = minScore;
+        result.row = bestRow;
+        result.col = bestCol;
+        return result;
+    }
+}
+
+Move findBestMove(int board2[BOARD_SIZE][BOARD_SIZE], int aiColor, int difficulty) {
+    // 난이도별 깊이 설정 (0: easy, 1: medium, 2: hard)
+    int depthMap[] = { 2, 3, 4 };
+    int depth = depthMap[difficulty];
+
+    int opponent = (aiColor == BLACK) ? WHITE : BLACK;
+    Move possibleMoves[MAX_MOVES];
+    int moveCount = getPossibleMoves(board2, possibleMoves, 20);
+    Move bestMove = { -1, -1 };
+
+    // 상대의 4목을 막아야 하는 경우 찾기
+    for (int i = 0; i < moveCount; i++) {
+        int row = possibleMoves[i].row;
+        int col = possibleMoves[i].col;
+
+        board2[row][col] = opponent;
+        if (AIcheckWin(board2, row, col, opponent)) {
+            board2[row][col] = EMPTY;
+            bestMove.row = row;
+            bestMove.col = col;
+            return bestMove; // 즉시 막기
+        }
+        board2[row][col] = EMPTY;
+    }
+
+    // AI가 즉시 이길 수 있는 경우 찾기
+    for (int i = 0; i < moveCount; i++) {
+        int row = possibleMoves[i].row;
+        int col = possibleMoves[i].col;
+
+        board2[row][col] = aiColor;
+        if (AIcheckWin(board2, row, col, aiColor)) {
+            board2[row][col] = EMPTY;
+            bestMove.row = row;
+            bestMove.col = col;
+            return bestMove; // 즉시 승리
+        }
+        board2[row][col] = EMPTY;
+    }
+
+    // Minimax 알고리즘으로 최적 수 찾기
+    MoveResult result = minimax(board2, depth, INT_MIN, INT_MAX, 1, aiColor);
+
+    // Easy 난이도: 30% 확률로 랜덤 실수
+    if (difficulty == 0 && (rand() % 100) < 30) {
+        int randomIndex = rand() % ((moveCount < 5) ? (moveCount == 0 ? 1 : moveCount) : 5);
+        return possibleMoves[randomIndex];
+    }
+
+    bestMove.row = result.row;
+    bestMove.col = result.col;
+    return bestMove;
 }
 
 // 메인 게임 루프
