@@ -154,12 +154,20 @@ int placeStone(int x, int y) {
 }
 
 void aiMove() {
-    int x, y;
-    do {
-        x = rand() % SIZE;
-        y = rand() % SIZE;
-    } while (board[y][x] != EMPTY);
-    placeStone(x, y);
+    int difficulty = 2; //탐색 깊이를 뜻합니다. 숫자를 높일수록 AI 난이도가 어려워집니다.
+    Move best = findBestMove(board, WHITE, difficulty);
+    if(best.row != -1 && best.col != -1){
+        placeStone(best.col, best.row);
+    }
+    else{
+        int x, y;
+        do{
+            x = rand() % SIZE;
+            y = rand() % SIZE;
+        }
+        while(board[y][x] != EMPTY);
+        placeStone(x,y);
+    }
 }
 
 // 승리 체크
