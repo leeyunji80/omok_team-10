@@ -59,6 +59,7 @@ void HandleExit(const SaveData* currentData);
 void ResetGame(SaveData* data);
 void update_game_result(const char* nickname, int did_win);
 void print_rankings(void);
+int AIcheckWin(int board2[BOARD_SIZE][BOARD_SIZE], int row, int col, int color);
 
 void clearScreen() {
     system("cls");
@@ -551,6 +552,30 @@ void showMenu() {
     default: printf("잘못된 선택입니다.\n"); Sleep(600); break;
     }
   }
+}
+
+AIcheckWin(int board2[BOARD_SIZE][BOARD_SIZE], int row, int col, int color){
+    int dx[] = { 1, 0, 1, 1 };
+    int dy[] = { 0, 1, 1, -1 };
+
+ for (int dir = 0; dir < 4; dir++) {
+     int count = 1;
+     int nx = col + dx[dir], ny = row + dy[dir];
+     while (nx >= 0 && nx < BOARD_SIZE && ny >= 0 && ny < BOARD_SIZE && board2[ny][nx] == color) {
+         count++;
+         nx += dx[dir];
+         ny += dy[dir];
+     }
+     nx = col - dx[dir];
+     ny = row - dy[dir];
+     while (nx >= 0 && nx < BOARD_SIZE && ny >= 0 && ny < BOARD_SIZE && board2[ny][nx] == color) {
+         count++;
+         nx -= dx[dir];
+         ny -= dy[dir];
+     }
+     if (count >= 5) return color;
+ }
+ return 0;
 }
 
 // 메인 게임 루프
