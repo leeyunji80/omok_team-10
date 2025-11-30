@@ -1049,7 +1049,16 @@ int main() {
     currentData.currentTurn = currentPlayer;
     currentData.gameMode = gameMode;
 
-    HandleExit(&currentData);
+    if(gameMode == 1 || gameMode == 2 || gameMode == 3){
+        printf("\n게임이 종료되었습니다. 저장하시겠습니까?\n");
+        SaveData currentData;
+        for (int i = 0; i < SAVE_BOARD_SIZE; i++)
+        for (int j = 0; j < SAVE_BOARD_SIZE; j++)
+            currentData.board[i][j] = (i < SIZE && j < SIZE) ? board[i][j] : 0;
+    currentData.currentTurn = currentPlayer;
+    currentData.gameMode = gameMode;
 
+    HandleExit(&currentData);
+    }
     return 0;
 }
