@@ -571,7 +571,7 @@ void showMenu() {
     switch (choice) {
     case 1: SaveCurrentGame(); printf("아무키나 누르면 게임으로 돌아갑니다..."); _getch(); return ;
     case 2:   if (LoadSelectedGame()) {
-                printf("게임을 불러왔습니다. 아무 키나 누르면 게임 화면으로 돌아갑니다...");
+                return ;
             } else {
                 printf("불러오기를 실패하거나 취소했습니다. 아무 키나 누르면 메뉴로 돌아갑니다...");
             }
