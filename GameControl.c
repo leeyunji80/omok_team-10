@@ -11,57 +11,6 @@
 #include "minimax.h"
 
 #ifdef _WIN32
-#include <conio.h>
-#include <windows.h>
-#else
-#include <termios.h>
-#include <unistd.h>
-// Unix/macOS용 getch 구현
-int _getch(void) {
-    struct termios oldattr, newattr;
-    int ch;
-    tcgetattr(STDIN_FILENO, &oldattr);
-    newattr = oldattr;
-    newattr.c_lflag &= ~(ICANON | ECHO);
-    tcsetattr(STDIN_FILENO, TCSANOW, &newattr);
-    ch = getchar();
-    tcsetattr(STDIN_FILENO, TCSANOW, &oldattr);
-    return ch;
-}
-
-// Unix/macOS용 Sleep 구현 (밀리초)
-void Sleep(int ms) {
-    usleep(ms * 1000);
-}
-#endif
-
-#define SIZE 15
-#define BLACK 1
-#define WHITE 2
-#define EMPTY 0
-#define SAVE_BOARD_SIZE 15
-#define MAX_SAVE_SLOTS 5
-#define BOARD_SIZE SIZE
-#define MAX_MOVES 225
-
-typedef struct{
-    int board[SAVE_BOARD_SIZE][SAVE_BOARD_SIZE];
-    int currentTurn;
-    int gameMode;
-} SaveData;
-
-typedef struct{
-    int score;
-    int row;
-    int col;
-}MoveResult;
-
-typedef struct{
-    int row;
-    int col;
-}Move;
-
-#ifdef _WIN32
     #include <conio.h>
     #include <windows.h>
 #else
@@ -87,13 +36,43 @@ typedef struct{
     }
 #endif
 
+#define SIZE 15
+#define BLACK 1
+#define WHITE 2
+#define EMPTY 0
+#define SAVE_BOARD_SIZE 15
+#define MAX_SAVE_SLOTS 5
+#define BOARD_SIZE SIZE
+#define MAX_MOVES 60
+#define INFINITY_SCORE 10000000
+
 /*==========전역 변수 상태=============*/
 int board[SIZE][SIZE];
 int cursorX = 0, cursorY = 0;
 int currentPlayer = BLACK;
 int gameMode = 0; // 1=1인용, 2=2인용
+int difficulty = MEDIUM; // AI 난이도 (기본: 중간)
 int lastMoveX = -1, lastMoveY = -1;
 char player_nickname[50] = "Player";
+
+
+typedef struct{
+    int board[SAVE_BOARD_SIZE][SAVE_BOARD_SIZE];
+    int currentTurn;
+    int gameMode;
+} SaveData;
+
+typedef struct{
+    int score;
+    int row;
+    int col;
+}MoveResult;
+
+typedef struct{
+    int row;
+    int col;
+}Move;
+
 
 /*==========함수 프로토 타입============*/
 void clearScreen(void);
