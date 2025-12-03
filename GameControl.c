@@ -54,6 +54,7 @@ int gameMode = 0; // 1=1인용, 2=2인용
 int difficulty = MEDIUM; // AI 난이도 (기본: 중간)
 int lastMoveX = -1, lastMoveY = -1;
 char player_nickname[50] = "Player";
+int gameEndedByVictory = 0;
 
 /*============= AI 관련 =====================*/
 static const int DX[] = { 1, 0, 1, 1 };
@@ -1194,6 +1195,7 @@ void gameLoop() {
             aiMove();
             printBoard();
             if (checkWinGameplay(lastMoveX, lastMoveY) == 2) {
+                int gameEndedByVictory = 0;
                 printf("백돌(AI) 승리!\n");
                 if(gameMode == 1){
                     fflush(stdin);
@@ -1215,6 +1217,7 @@ void gameLoop() {
                 printBoard();
                 int winner = checkWinGameplay(lastMoveX, lastMoveY);
                 if (winner != 0) {
+                    int gameEndedByVictory = 0;
                     hideCursor(0);
                     printf("%s 승리! 게임이 종료되었습니다.\n", (winner == BLACK) ? "흑" : "백");
                     if(gameMode == 1){
@@ -1296,6 +1299,7 @@ int main() {
     currentData.gameMode = gameMode;
 
     if(gameMode == 1 || gameMode == 2 || gameMode == 3){
+        if(int gameEndedByVictory == 0){
         printf("\n게임이 종료되었습니다. 저장하시겠습니까?\n");
         SaveData currentData;
         for (int i = 0; i < SAVE_BOARD_SIZE; i++)
@@ -1305,6 +1309,7 @@ int main() {
     currentData.gameMode = gameMode;
 
     HandleExit(&currentData);
+        }
     }
 
      printf("\n게임이 종료되었습니다. 아무 키나 누르면 콘솔이 닫힙니다...\n");
