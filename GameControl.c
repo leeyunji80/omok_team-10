@@ -74,6 +74,13 @@ typedef enum {
 static int positionWeight[BOARD_SIZE][BOARD_SIZE];
 static int initialized = 0;
 
+// 후보 수 구조체
+typedef struct {
+    int row;
+    int col;
+    int score;
+} ScoredMove;
+
 // AI 초기화
 void initAI(void) {
     if (initialized) return;
@@ -605,13 +612,6 @@ typedef struct {
     int col;
     int priority;
 } CandidateMove;
-// 후보 수 구조체
-typedef struct {
-    int row;
-    int col;
-    int score;
-} ScoredMove;
-
 
 /*==========함수 프로토 타입============*/
 void clearScreen(void);
@@ -893,7 +893,7 @@ void print_rankings() {
         int wins;
         int losses;
         double win_rate;
-        char timep[6];
+        char time[6];
     } RankPlayer;
 
     FILE* fp = NULL;
@@ -1303,7 +1303,7 @@ int main() {
     currentData.gameMode = gameMode;
 
     if(gameMode == 1 || gameMode == 2 || gameMode == 3){
-        if(int gameEndedByVictory == 0){
+        if(gameEndedByVictory == 0){
         printf("\n게임이 종료되었습니다. 저장하시겠습니까?\n");
         SaveData currentData;
         for (int i = 0; i < SAVE_BOARD_SIZE; i++)
@@ -1318,6 +1318,6 @@ int main() {
 
      printf("\n게임이 종료되었습니다. 아무 키나 누르면 콘솔이 닫힙니다...\n");
      _getch();
-    cleanpAI();
+    cleanupAI();
     return 0;
 }
