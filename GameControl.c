@@ -4,16 +4,15 @@
 #include <stdlib.h>
 #include <time.h>
 #include <windows.h>
+#include "minimax.h"
 
 #define SIZE 15
-#define BLACK 1
-#define WHITE 2
-#define EMPTY 0
 
 int board[SIZE][SIZE];
 int cursorX = 0, cursorY = 0;
 int currentPlayer = BLACK;
 int gameMode = 0; // 1=1인용, 2=2인용
+int difficulty = MEDIUM; // AI 난이도 (기본: 중간)
 int lastMoveX = -1, lastMoveY = -1;
 
 void clearScreen() {
@@ -89,14 +88,12 @@ int placeStone(int x, int y) {
     return 1;
 }
 
-// AI 착수 (랜덤)
+// AI 착수 (Minimax 알고리즘)
 void aiMove() {
-    int x, y;
-    do {
-        x = rand() % SIZE;
-        y = rand() % SIZE;
-    } while (board[y][x] != EMPTY);
-    placeStone(x, y);
+    Move bestMove = findBestMove(board, WHITE, difficulty);
+    if (bestMove.row >= 0 && bestMove.col >= 0) {
+        placeStone(bestMove.col, bestMove.row);
+    }
 }
 
 // 승리 체크
