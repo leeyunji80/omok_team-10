@@ -155,9 +155,9 @@ void game_loop() {
             continue;
         }
 
-        if (input != 'b') {
-            if (next_row >= 0 && next_row < BOARD_SIZE && 
-                next_col >= 0 && next_col < BOARD_SIZE) {
+         if (next_row >= 0 && next_row < BOARD_SIZE && next_col >= 0 && next_col < BOARD_SIZE) {
+            current_row = next_row;
+            current_col = next_col;
                 // 범위 내라면 커서 위치 업데이트
                 current_row = next_row;
                 current_col = next_col;

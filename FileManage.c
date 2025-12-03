@@ -116,6 +116,7 @@ void print_rankings() {
         int wins;
         int losses;
         double win_rate;
+        char time[6];
     } RankPlayer;
 
     FILE* fp = NULL;
@@ -164,12 +165,15 @@ void print_rankings() {
         cJSON* wins = cJSON_GetObjectItem(item, "wins");
         cJSON* losses = cJSON_GetObjectItem(item, "losses");
         cJSON* rate = cJSON_GetObjectItem(item, "win_rate");
+        cJSON* time = cJSON_GetObjectItem(item, "time");
 
-        if (name && wins && losses && rate) {
+
+        if (name && wins && losses && rate && time) {
             strcpy_s(players[i].nickname, sizeof(players[i].nickname), name->valuestring);
             players[i].wins = wins->valueint;
             players[i].losses = losses->valueint;
             players[i].win_rate = rate->valuedouble;
+            strcpy_s(players[i].time, sizeof(players[i].time), time->valuestring);
         }
     }
 
@@ -193,24 +197,27 @@ void print_rankings() {
             }
         }
     }
-
-    printf("\n=== 랭킹 시스템 (상위 5명) ===\n");
-    printf("%-5s %-15s %-10s %-10s\n", "순위", "닉네임", "승률", "전적");
-    printf("-------------------------------------------\n");
+    
+    system("cls");
+    printf("\n====== 랭킹 (상위 5명) ======\n");
+    printf("%-5s %-15s %-10s %-10s %-10s\n", "순위", "닉네임", "승률", "전적", "마지막 플레이");
+    printf("------------------------------------------------------------\n");
 
     int limit = (size < 5) ? size : 5;
     for (int i = 0; i < limit; i++) {
-        printf("%-5d %-15s %-9.1f%% %d승 %d패\n",
+        printf("%-5d %-15s %.1f%% %5d승 %3d패 %11s\n",
             i + 1,
             players[i].nickname,
             players[i].win_rate * 100,
             players[i].wins,
-            players[i].losses);
+            players[i].losses,
+            players[i].time);
     }
-    printf("-------------------------------------------\n");
+    printf("------------------------------------------------------------\n");
 
     free(players);
     cJSON_Delete(root);
+    _getch();
 }
 
 
@@ -226,7 +233,7 @@ typedef struct {
 void get_filename(char* buffer) {
     time_t t = time(NULL);
     struct tm tm = *localtime(&t);
-    sprintf(buffer, "%04d%02d%02d_%02d%02d%02d.dat",
+    sprintf(buffer, "%04d년%02d월%02d일_%02d시%02d분%02d초.dat",
         tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday,
         tm.tm_hour, tm.tm_min, tm.tm_sec);
 }
