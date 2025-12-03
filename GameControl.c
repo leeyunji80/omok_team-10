@@ -40,6 +40,30 @@ int gameMode = 0; // 1=1인용, 2=2인용
 int difficulty = MEDIUM; // AI 난이도 (기본: 중간)
 int lastMoveX = -1, lastMoveY = -1;
 
+// 커서를 (0,0)으로 이동 (깜빡임 방지)
+void gotoxy(int x, int y) {
+#ifdef _WIN32
+    COORD pos = {x, y};
+    SetConsoleCursorPosition(GetStdHandle(STD_OUTPUT_HANDLE), pos);
+#else
+    printf("\033[%d;%dH", y + 1, x + 1);
+#endif
+}
+
+// 커서 숨기기/보이기
+void hideCursor(int hide) {
+#ifdef _WIN32
+    HANDLE consoleHandle = GetStdHandle(STD_OUTPUT_HANDLE);
+    CONSOLE_CURSOR_INFO info;
+    GetConsoleCursorInfo(consoleHandle, &info);
+    info.bVisible = !hide;
+    SetConsoleCursorInfo(consoleHandle, &info);
+#else
+    if (hide) printf("\033[?25l");
+    else printf("\033[?25h");
+#endif
+}
+
 void clearScreen() {
 #ifdef _WIN32
     system("cls");
@@ -56,9 +80,9 @@ void initBoard() {
     cursorY = 0;
 }
 
-// 보드 출력
+// 보드 출력 (깜빡임 방지: 커서 이동 방식)
 void printBoard() {
-    clearScreen();
+    gotoxy(0, 0);  // 커서를 맨 위로 이동 (화면 지우지 않음)
     printf("                                        메뉴 M키\n\n");
 
     printf("   ");
@@ -91,6 +115,8 @@ void printBoard() {
 
     printf("흑돌: X  백돌: O\t현재 차례: %s\n", (currentPlayer == BLACK) ? "흑" : "백");
     printf("착수: B키\n");
+    printf("                              \n");  // 이전 메시지 지우기용 빈 줄
+    fflush(stdout);  // 버퍼 즉시 출력
 }
 
 // 커서 이동 (WASD)
@@ -149,6 +175,7 @@ int checkWin(int x, int y) {
 // 메뉴 화면
 void showMenu() {
     int choice;
+    hideCursor(0);  // 메뉴에서 커서 보이기
     clearScreen();
     printf("========== 메뉴 ==========\n");
     printf("1. 게임 저장\n");
@@ -161,15 +188,19 @@ void showMenu() {
     switch (choice) {
     case 1: printf("게임 저장 기능 선택\n"); break;
     case 2: printf("게임 불러오기 기능 선택\n"); break;
-    case 3: printf("게임 종료 선택\n"); exit(0); break;
+    case 3: hideCursor(0); printf("게임 종료 선택\n"); exit(0); break;
     default: printf("잘못된 선택입니다.\n"); break;
     }
     printf("아무 키나 누르면 메뉴를 닫습니다...\n");
     _getch();
+    clearScreen();  // 메뉴 나갈 때 화면 정리
+    hideCursor(1);  // 게임 중 커서 숨기기
 }
 
 // 메인 게임 루프
 void gameLoop() {
+    clearScreen();  // 게임 시작 시 한 번만 화면 지움
+    hideCursor(1);  // 콘솔 커서 숨기기
     printBoard();
     int key;
 
@@ -178,6 +209,7 @@ void gameLoop() {
             aiMove();
             printBoard();
             if (checkWin(lastMoveX, lastMoveY) == 2) {
+                hideCursor(0);  // 커서 다시 보이기
                 printf("백돌 승리!\n");
                 break;
             }
@@ -193,6 +225,7 @@ void gameLoop() {
                 printBoard();
                 int winner = checkWin(lastMoveX, lastMoveY);
                 if (winner != 0) {
+                    hideCursor(0);  // 커서 다시 보이기
                     printf("%s 승리!\n", (winner == BLACK) ? "흑" : "백");
                     break;
                 }
