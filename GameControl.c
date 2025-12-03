@@ -691,8 +691,6 @@ void printTemporaryMessage(const char* msg, int seconds) {
 // 보드 출력
 void printBoard() {
     gotoxy(0, 0);
-    printf("남은 시간: %d초\n", remainTime);
-    gotoxy(0, 0);
     printf("                                        메뉴 M키\n\n");
 
     printf("   ");
