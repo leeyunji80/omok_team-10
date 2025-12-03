@@ -617,7 +617,7 @@ typedef struct {
 /*==========함수 프로토 타입============*/
 void clearScreen(void);
 void initBoard(void);
-void printBoard(void);
+void printBoard(int remainTime);
 void moveCursor(char key);
 int placeStone(int x, int y);
 void aiMove(void);
@@ -689,7 +689,7 @@ void printTemporaryMessage(const char* msg, int seconds) {
 }
 
 // 보드 출력
-void printBoard() {
+void printBoard(int remainTime) {
     gotoxy(0, 0);
     printf("                                        메뉴 M키\n\n");
 
@@ -1219,9 +1219,9 @@ void gameLoop() {
     while (1) {
         if (gameMode == 1 && currentPlayer == WHITE) { // AI 차례
             aiMove();
-            printBoard();
+            printBoard(-1);
             if (checkWinGameplay(lastMoveX, lastMoveY) == 2) {
-                int gameEndedByVictory = 0;
+                gameEndedByVictory = 1;
                 printf("백돌(AI) 승리!\n");
                 if(gameMode == 1){
                     fflush(stdin);
@@ -1241,58 +1241,41 @@ if (gameMode == 2) {
      int timed_out = 0;
      int firstRender = 0;
 
-     while (1) {
+         while (1) {
 
-         int elapsed = GetTickCount() - start;
-         int remain = 10 - (elapsed / 1000);
-         if (remain < 0) remain = 0;
+        // 경과 시간 계산
+        int elapsed = GetTickCount() - start;
+        int remain = 10 - (elapsed / 1000);
+        if (remain < 0) remain = 0;
 
-         if (!firstRender) {
-             printBoard(-1);
-             firstRender = 1;
-         }
+        if (!firstRender) {
+            printBoard(-1);
+            firstRender = 1;
+        }
 
-         printRemainTime(remain);
+        // 남은 시간 텍스트만 갱신
+        printRemainTime(remain);
 
-         if (_kbhit()) {
-             int key = _getch();
+        if (_kbhit()) {
+            key = _getch();
+            break;
+        }
+        if (elapsed >= 10000) {
+            timed_out = 1;
+            break;
+        }
 
-             // 돌 놓기 시만 타이머 재설정
-             if (key == 'b' || key == 'B') {
-                 if (placeStone(cursorX, cursorY)) {
-                     // 돌 놓으면 다음 턴으로
-                     currentPlayer = (currentPlayer == BLACK) ? WHITE : BLACK;
-                     break;  // 루프 탈출 후 다시 턴 시작
-                 }
-             }
-             // 커서 이동은 타이머 계속 카운트 다운
-             else if (key == 'w' || key == 'a' || key == 's' || key == 'd' ||
-                 key == 'W' || key == 'A' || key == 'S' || key == 'D') {
-                 moveCursor(key);
-                 printBoard(-1); // 커서 이동 반영
-             }
-             // 메뉴 호출
-             else if (key == 'm' || key == 'M') {
-                 showMenu();
-                 firstRender = 0;
-             }
-         }
+        Sleep(50);
+    }
 
-         if (elapsed >= 10000) {
-             timed_out = 1;
-             break;
-         }
-
-         Sleep(50);
-     }
-
-     if (timed_out) {
-         printBoard(-1);
-         printTemporaryMessage("시간 초과! 턴이 넘어갑니다.", 3);
-         currentPlayer = (currentPlayer == BLACK) ? WHITE : BLACK;
-         Sleep(500);
-     }
- }
+    if (timed_out) {
+        printBoard(0);
+       printTemporaryMessage("시간 초과! 턴이 넘어갑니다.", 3); // 3초 표시 후 지움
+        currentPlayer = (currentPlayer == BLACK) ? WHITE : BLACK;
+        Sleep(500);
+        continue;
+    }
+}
 
  else {
      // 1인용은 기존 방식 유지
@@ -1305,10 +1288,10 @@ if (gameMode == 2) {
         }
         else if (key == 'b' || key == 'B') {
             if (placeStone(cursorX, cursorY)) {
-                printBoard();
+                printBoard(-1);
                 int winner = checkWinGameplay(lastMoveX, lastMoveY);
                 if (winner != 0) {
-                    int gameEndedByVictory = 0;
+                    gameEndedByVictory = 1;
                     hideCursor(0);
                     printf("%s 승리! 게임이 종료되었습니다.\n", (winner == BLACK) ? "흑" : "백");
                     if(gameMode == 1){
@@ -1327,7 +1310,7 @@ if (gameMode == 2) {
             showMenu();
         }
 
-        printBoard();
+        printBoard(-1);
     }
     hideCursor(0);
 }
@@ -1335,6 +1318,7 @@ if (gameMode == 2) {
 int main() {
     srand((unsigned int)time(NULL));
     initBoard();
+    initAI();
 
     printf("\n=========시작화면=======\n");
     printf("1. 1인용 게임 \n");
@@ -1347,6 +1331,7 @@ int main() {
     scanf("%d", &gameMode);
 
     if(gameMode == 1){
+        clearScreen();
         int diffChoice;
         printf("\n======= 난이도 선택 =======\n");
         printf("1. 쉬움 (Easy)\n");
@@ -1386,7 +1371,6 @@ int main() {
 
     if(gameMode == 1 || gameMode == 2 || gameMode == 3){
         if(gameEndedByVictory == 0){
-        printf("\n게임이 종료되었습니다. 저장하시겠습니까?\n");
         SaveData currentData;
         for (int i = 0; i < SAVE_BOARD_SIZE; i++)
         for (int j = 0; j < SAVE_BOARD_SIZE; j++)
