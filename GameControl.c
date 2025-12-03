@@ -1,10 +1,35 @@
 #define _CRT_SECURE_NO_WARNINGS
 #include <stdio.h>
-#include <conio.h>
 #include <stdlib.h>
 #include <time.h>
-#include <windows.h>
 #include "minimax.h"
+
+// 크로스플랫폼 호환성
+#ifdef _WIN32
+    #include <conio.h>
+    #include <windows.h>
+#else
+    #include <termios.h>
+    #include <unistd.h>
+
+    // Unix/macOS용 getch 구현
+    int _getch(void) {
+        struct termios oldattr, newattr;
+        int ch;
+        tcgetattr(STDIN_FILENO, &oldattr);
+        newattr = oldattr;
+        newattr.c_lflag &= ~(ICANON | ECHO);
+        tcsetattr(STDIN_FILENO, TCSANOW, &newattr);
+        ch = getchar();
+        tcsetattr(STDIN_FILENO, TCSANOW, &oldattr);
+        return ch;
+    }
+
+    // Unix/macOS용 Sleep 구현 (밀리초)
+    void Sleep(int ms) {
+        usleep(ms * 1000);
+    }
+#endif
 
 #define SIZE 15
 
@@ -16,7 +41,11 @@ int difficulty = MEDIUM; // AI 난이도 (기본: 중간)
 int lastMoveX = -1, lastMoveY = -1;
 
 void clearScreen() {
+#ifdef _WIN32
     system("cls");
+#else
+    system("clear");
+#endif
 }
 
 void initBoard() {
