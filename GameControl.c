@@ -1159,7 +1159,9 @@ void showMenu() {
     switch (choice) {
     case 1: SaveCurrentGame(); printf("아무키나 누르면 게임으로 돌아갑니다..."); _getch(); return ;
     case 2:   if (LoadSelectedGame()) {
+        clearScreen();
                 return ;
+                
             } else {
                 printf("불러오기를 실패하거나 취소했습니다. 아무 키나 누르면 메뉴로 돌아갑니다...");
             }
@@ -1170,6 +1172,10 @@ void showMenu() {
             break;
     default: printf("잘못된 선택입니다.\n"); Sleep(600); break;
     }
+    printf("아무 키나 누르면 메뉴를 닫습니다...\n");
+    _getch();
+    clearScreen();  // 메뉴 나갈 때 화면 정리
+    hideCursor(1);  // 게임 중 커서 숨기기
   }
 
 
