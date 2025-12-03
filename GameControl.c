@@ -596,6 +596,7 @@ typedef struct {
     int board[SAVE_BOARD_SIZE][SAVE_BOARD_SIZE];
     int currentTurn;
     int gameMode;
+    int aiDifficulty;
 } SaveData;
 
 typedef struct {
@@ -1123,6 +1124,7 @@ void SaveCurrentGame() {
             data.board[i][j] = board[i][j];
     data.currentTurn = currentPlayer;
     data.gameMode = gameMode;
+    data.aiDifficulty = difficulty;
     SaveGame(&data);
 }
 int LoadSelectedGame() {
@@ -1135,6 +1137,7 @@ int LoadSelectedGame() {
 
     currentPlayer = data.currentTurn;
     gameMode = data.gameMode;
+    difficulty = data.aiDifficulty;
     //커서 초기화
     cursorX = 0;
     cursorY = 0;
