@@ -27,6 +27,9 @@ typedef struct {
 } MoveResult;
 
 // 함수 선언
+int checkWinBoard(int board[BOARD_SIZE][BOARD_SIZE], int row, int col, int color);
+int evaluateBoard(int board[BOARD_SIZE][BOARD_SIZE], int aiColor);
+int getPossibleMoves(int board[BOARD_SIZE][BOARD_SIZE], Move moves[], int maxCount);
 MoveResult minimax(int board[BOARD_SIZE][BOARD_SIZE], int depth, int alpha, int beta, int isMaximizing, int aiColor);
 Move findBestMove(int board[BOARD_SIZE][BOARD_SIZE], int aiColor, int difficulty);
 
