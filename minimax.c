@@ -78,15 +78,15 @@ static void countLine(int board[BOARD_SIZE][BOARD_SIZE], int row, int col, int c
 int evaluateBoard(int board[BOARD_SIZE][BOARD_SIZE], int aiColor) {
     int score = 0;
 
-    // 패턴 점수 정의
-    // 5목: 100000, 열린4: 10000, 닫힌4: 1000, 열린3: 1000, 닫힌3: 100, 열린2: 100, 닫힌2: 10
+    // 패턴 점수 정의 (방어에 더 높은 가중치)
+    // 상대 위협은 1.5배 가중치로 계산하여 방어 우선
 
     for (int row = 0; row < BOARD_SIZE; row++) {
         for (int col = 0; col < BOARD_SIZE; col++) {
             if (board[row][col] == EMPTY) continue;
 
             int color = board[row][col];
-            int multiplier = (color == aiColor) ? 1 : -1;
+            int isAI = (color == aiColor);
 
             for (int dir = 0; dir < 4; dir++) {
                 int count, openEnds;
@@ -101,16 +101,25 @@ int evaluateBoard(int board[BOARD_SIZE][BOARD_SIZE], int aiColor) {
 
                 // 패턴별 점수 부여
                 if (count >= 5) {
-                    score += 100000 * multiplier;
+                    score += isAI ? 100000 : -100000;
                 } else if (count == 4) {
-                    if (openEnds == 2) score += 10000 * multiplier;      // 열린 4
-                    else if (openEnds == 1) score += 1000 * multiplier;  // 닫힌 4
+                    if (openEnds == 2) {
+                        score += isAI ? 50000 : -80000;   // 열린 4 (상대것 더 위험)
+                    } else if (openEnds == 1) {
+                        score += isAI ? 5000 : -8000;     // 닫힌 4
+                    }
                 } else if (count == 3) {
-                    if (openEnds == 2) score += 1000 * multiplier;       // 열린 3
-                    else if (openEnds == 1) score += 100 * multiplier;   // 닫힌 3
+                    if (openEnds == 2) {
+                        score += isAI ? 5000 : -8000;     // 열린 3 (매우 위험)
+                    } else if (openEnds == 1) {
+                        score += isAI ? 500 : -800;       // 닫힌 3
+                    }
                 } else if (count == 2) {
-                    if (openEnds == 2) score += 100 * multiplier;        // 열린 2
-                    else if (openEnds == 1) score += 10 * multiplier;    // 닫힌 2
+                    if (openEnds == 2) {
+                        score += isAI ? 200 : -300;       // 열린 2
+                    } else if (openEnds == 1) {
+                        score += isAI ? 50 : -80;         // 닫힌 2
+                    }
                 }
             }
         }
@@ -273,15 +282,32 @@ MoveResult minimax(int board[BOARD_SIZE][BOARD_SIZE], int depth, int alpha, int 
     }
 }
 
+// 특정 위치에 착수했을 때 열린 4 또는 열린 3이 형성되는지 확인
+static int checkThreat(int board[BOARD_SIZE][BOARD_SIZE], int row, int col, int color, int threatLevel) {
+    // threatLevel: 4 = 열린4/닫힌4 확인, 3 = 열린3 확인
+    for (int dir = 0; dir < 4; dir++) {
+        int count, openEnds;
+        countLine(board, row, col, color, dir, &count, &openEnds);
+
+        if (threatLevel == 4 && count >= 4 && openEnds >= 1) {
+            return 1; // 4목 위협 (열린 또는 닫힌)
+        }
+        if (threatLevel == 3 && count >= 3 && openEnds == 2) {
+            return 1; // 열린 3목 위협
+        }
+    }
+    return 0;
+}
+
 // AI의 최적 착수 찾기
 Move findBestMove(int board[BOARD_SIZE][BOARD_SIZE], int aiColor, int difficulty) {
     // 난이도별 깊이 설정 (0: easy, 1: medium, 2: hard)
-    int depthMap[] = { 2, 3, 4 };
+    int depthMap[] = { 2, 4, 6 };
     int depth = depthMap[difficulty];
 
     int opponent = (aiColor == BLACK) ? WHITE : BLACK;
     Move possibleMoves[MAX_MOVES];
-    int moveCount = getPossibleMoves(board, possibleMoves, 20);
+    int moveCount = getPossibleMoves(board, possibleMoves, 30);
     Move bestMove = { -1, -1 };
 
     // 후보가 없으면 중앙 반환
@@ -291,13 +317,13 @@ Move findBestMove(int board[BOARD_SIZE][BOARD_SIZE], int aiColor, int difficulty
         return bestMove;
     }
 
-    // Easy 난이도: 30% 확률로 랜덤 실수 (즉시 승리/방어 상황 제외)
+    // Easy 난이도: 30% 확률로 랜덤 실수
     if (difficulty == EASY && (rand() % 100) < 30) {
         int randomIndex = rand() % ((moveCount < 5) ? moveCount : 5);
         return possibleMoves[randomIndex];
     }
 
-    // 1순위: AI가 즉시 이길 수 있는 경우 (공격 우선)
+    // 1순위: AI가 즉시 이길 수 있는 경우 (5목)
     for (int i = 0; i < moveCount; i++) {
         int row = possibleMoves[i].row;
         int col = possibleMoves[i].col;
@@ -307,12 +333,12 @@ Move findBestMove(int board[BOARD_SIZE][BOARD_SIZE], int aiColor, int difficulty
             board[row][col] = EMPTY;
             bestMove.row = row;
             bestMove.col = col;
-            return bestMove; // 즉시 승리
+            return bestMove;
         }
         board[row][col] = EMPTY;
     }
 
-    // 2순위: 상대의 4목을 막아야 하는 경우 (방어)
+    // 2순위: 상대의 5목 막기
     for (int i = 0; i < moveCount; i++) {
         int row = possibleMoves[i].row;
         int col = possibleMoves[i].col;
@@ -322,12 +348,72 @@ Move findBestMove(int board[BOARD_SIZE][BOARD_SIZE], int aiColor, int difficulty
             board[row][col] = EMPTY;
             bestMove.row = row;
             bestMove.col = col;
-            return bestMove; // 즉시 막기
+            return bestMove;
         }
         board[row][col] = EMPTY;
     }
 
-    // 3순위: Minimax 알고리즘으로 최적 수 찾기
+    // 3순위: AI 열린 4 또는 닫힌 4 만들기
+    for (int i = 0; i < moveCount; i++) {
+        int row = possibleMoves[i].row;
+        int col = possibleMoves[i].col;
+
+        board[row][col] = aiColor;
+        if (checkThreat(board, row, col, aiColor, 4)) {
+            board[row][col] = EMPTY;
+            bestMove.row = row;
+            bestMove.col = col;
+            return bestMove;
+        }
+        board[row][col] = EMPTY;
+    }
+
+    // 4순위: 상대 열린 4/닫힌 4 막기
+    for (int i = 0; i < moveCount; i++) {
+        int row = possibleMoves[i].row;
+        int col = possibleMoves[i].col;
+
+        board[row][col] = opponent;
+        if (checkThreat(board, row, col, opponent, 4)) {
+            board[row][col] = EMPTY;
+            bestMove.row = row;
+            bestMove.col = col;
+            return bestMove;
+        }
+        board[row][col] = EMPTY;
+    }
+
+    // 5순위: AI 열린 3 만들기
+    for (int i = 0; i < moveCount; i++) {
+        int row = possibleMoves[i].row;
+        int col = possibleMoves[i].col;
+
+        board[row][col] = aiColor;
+        if (checkThreat(board, row, col, aiColor, 3)) {
+            board[row][col] = EMPTY;
+            bestMove.row = row;
+            bestMove.col = col;
+            return bestMove;
+        }
+        board[row][col] = EMPTY;
+    }
+
+    // 6순위: 상대 열린 3 막기
+    for (int i = 0; i < moveCount; i++) {
+        int row = possibleMoves[i].row;
+        int col = possibleMoves[i].col;
+
+        board[row][col] = opponent;
+        if (checkThreat(board, row, col, opponent, 3)) {
+            board[row][col] = EMPTY;
+            bestMove.row = row;
+            bestMove.col = col;
+            return bestMove;
+        }
+        board[row][col] = EMPTY;
+    }
+
+    // 7순위: Minimax 알고리즘으로 최적 수 찾기
     MoveResult result = minimax(board, depth, INT_MIN, INT_MAX, 1, aiColor);
 
     bestMove.row = result.row;
