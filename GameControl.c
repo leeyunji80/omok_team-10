@@ -739,6 +739,26 @@ void aiMove() {
     }
 }
 
+int checkWin(int x, int y) {
+    int dx[] = { 1,0,1,1 };
+    int dy[] = { 0,1,1,-1 };
+    int player = board[y][x];
+
+    for (int dir = 0; dir < 4; dir++) {
+        int count = 1;
+        int nx = x + dx[dir], ny = y + dy[dir];
+        while (nx >= 0 && nx < SIZE && ny >= 0 && ny < SIZE && board[ny][nx] == player) {
+            count++; nx += dx[dir]; ny += dy[dir];
+        }
+        nx = x - dx[dir]; ny = y - dy[dir];
+        while (nx >= 0 && nx < SIZE && ny >= 0 && ny < SIZE && board[ny][nx] == player) {
+            count++; nx -= dx[dir]; ny -= dy[dir];
+        }
+        if (count >= 5) return player;
+    }
+    return 0;
+}
+
 // 승리 체크
 int checkWinGameplay(int x, int y) {
     int dx[] = { 1,0,1,1 };
