@@ -362,6 +362,9 @@ Move findBestMove(int board[BOARD_SIZE][BOARD_SIZE], int aiColor, int difficulty
     int bestAttackScore = 0, bestDefenseScore = 0;
     int bestAttackIdx = -1, bestDefenseIdx = -1;
 
+    // 긴급 방어 위치 (5목 막기)
+    int urgentDefenseIdx = -1;
+
     for (int i = 0; i < moveCount; i++) {
         int row = possibleMoves[i].row;
         int col = possibleMoves[i].col;
@@ -378,12 +381,9 @@ Move findBestMove(int board[BOARD_SIZE][BOARD_SIZE], int aiColor, int difficulty
             return bestMove;
         }
 
-        // 상대 즉시 승리 막기
-        if (defenseScore >= 1000000) {
-            if (bestDefenseIdx == -1) {
-                bestDefenseIdx = i;
-                bestDefenseScore = defenseScore;
-            }
+        // 상대 즉시 승리(5목) 막아야 하는 위치 기록
+        if (defenseScore >= 1000000 && urgentDefenseIdx == -1) {
+            urgentDefenseIdx = i;
         }
 
         // 최고 공격 수 추적
@@ -391,8 +391,8 @@ Move findBestMove(int board[BOARD_SIZE][BOARD_SIZE], int aiColor, int difficulty
             bestAttackScore = attackScore;
             bestAttackIdx = i;
         }
-        // 최고 방어 수 추적
-        if (defenseScore > bestDefenseScore) {
+        // 최고 방어 수 추적 (5목 제외, 별도 처리)
+        if (defenseScore > bestDefenseScore && defenseScore < 1000000) {
             bestDefenseScore = defenseScore;
             bestDefenseIdx = i;
         }
@@ -403,42 +403,42 @@ Move findBestMove(int board[BOARD_SIZE][BOARD_SIZE], int aiColor, int difficulty
         scoredMoves[i].score = attackScore + (int)(defenseScore * 1.1);
     }
 
-    // 우선순위 1: 상대가 즉시 이길 수 있는 곳(5목) 막기
-    if (bestDefenseScore >= 1000000 && bestDefenseIdx >= 0) {
-        bestMove.row = possibleMoves[bestDefenseIdx].row;
-        bestMove.col = possibleMoves[bestDefenseIdx].col;
+    // 우선순위 0: 상대 5목 긴급 방어 (가장 최우선!)
+    if (urgentDefenseIdx >= 0) {
+        bestMove.row = possibleMoves[urgentDefenseIdx].row;
+        bestMove.col = possibleMoves[urgentDefenseIdx].col;
         return bestMove;
     }
 
-    // 우선순위 2: 내가 승리 확정 수가 있으면 (열린4, 쌍사, 사삼)
+    // 우선순위 1: 내가 승리 확정 수 (열린4, 쌍사, 사삼)
     if (bestAttackScore >= 100000 && bestAttackIdx >= 0) {
         bestMove.row = possibleMoves[bestAttackIdx].row;
         bestMove.col = possibleMoves[bestAttackIdx].col;
         return bestMove;
     }
 
-    // 우선순위 3: 상대가 승리 확정 수를 만들 수 있으면 막기 (열린4, 쌍사, 사삼)
+    // 우선순위 2: 상대 승리 확정 수 막기 (열린4, 쌍사, 사삼)
     if (bestDefenseScore >= 100000 && bestDefenseIdx >= 0) {
         bestMove.row = possibleMoves[bestDefenseIdx].row;
         bestMove.col = possibleMoves[bestDefenseIdx].col;
         return bestMove;
     }
 
-    // 우선순위 4: 상대 닫힌4(10000점) 막기 - 한 수 안에 5목 가능
+    // 우선순위 3: 상대 닫힌4 막기 (한 수 안에 5목 가능)
     if (bestDefenseScore >= 10000 && bestDefenseIdx >= 0) {
         bestMove.row = possibleMoves[bestDefenseIdx].row;
         bestMove.col = possibleMoves[bestDefenseIdx].col;
         return bestMove;
     }
 
-    // 우선순위 5: 내 쌍삼(50000점) 만들기
+    // 우선순위 4: 내 쌍삼 만들기
     if (bestAttackScore >= 50000 && bestAttackIdx >= 0) {
         bestMove.row = possibleMoves[bestAttackIdx].row;
         bestMove.col = possibleMoves[bestAttackIdx].col;
         return bestMove;
     }
 
-    // 우선순위 6: 상대 열린3 등 위협 막기
+    // 우선순위 5: 상대 열린3 막기
     if (bestDefenseScore >= 5000 && bestDefenseIdx >= 0) {
         bestMove.row = possibleMoves[bestDefenseIdx].row;
         bestMove.col = possibleMoves[bestDefenseIdx].col;
