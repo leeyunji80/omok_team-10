@@ -1,6 +1,5 @@
 #define _CRT_SECURE_NO_WARNINGS
 #include <stdio.h>
-<<<<<<< HEAD
 #include <stdlib.h>
 #include "cJSON.h"
 #include <conio.h>
@@ -10,6 +9,31 @@
 #include <ctype.h>
 #include <string.h>
 #include "minimax.h"
+
+#ifdef _WIN32
+#include <conio.h>
+#include <windows.h>
+#else
+#include <termios.h>
+#include <unistd.h>
+// Unix/macOS용 getch 구현
+int _getch(void) {
+    struct termios oldattr, newattr;
+    int ch;
+    tcgetattr(STDIN_FILENO, &oldattr);
+    newattr = oldattr;
+    newattr.c_lflag &= ~(ICANON | ECHO);
+    tcsetattr(STDIN_FILENO, TCSANOW, &newattr);
+    ch = getchar();
+    tcsetattr(STDIN_FILENO, TCSANOW, &oldattr);
+    return ch;
+}
+
+// Unix/macOS용 Sleep 구현 (밀리초)
+void Sleep(int ms) {
+    usleep(ms * 1000);
+}
+#endif
 
 #define SIZE 15
 #define BLACK 1
