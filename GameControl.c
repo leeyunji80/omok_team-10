@@ -117,6 +117,7 @@ int checkWin(int x, int y) {
         }
         if (count >= 5) return player;
     }
+    return 0;
 }
 
 // 메뉴 화면
