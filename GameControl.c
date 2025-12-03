@@ -690,7 +690,9 @@ void printTemporaryMessage(const char* msg, int seconds) {
 
 // 보드 출력
 void printBoard() {
-    clearScreen();
+    gotoxy(0, 0);
+    printf("남은 시간: %d초\n", remainTime);
+    gotoxy(0, 0);
     printf("                                        메뉴 M키\n\n");
 
     printf("   ");
@@ -723,6 +725,8 @@ void printBoard() {
 
     printf("흑돌: X  백돌: O\t현재 차례: %s\n", (currentPlayer == BLACK) ? "흑" : "백");
     printf("착수: B키\n");
+    printf("                              \n");  // 이전 메시지 지우기용 빈 줄
+    fflush(stdout);
 }
 
 // 커서 이동 (WASD)
@@ -795,6 +799,13 @@ int checkWinGameplay(int x, int y) {
         if (count >= 5) return player;
     }
     return 0;
+}
+
+void printRemainTime(int remain) {
+    // 커서를 바둑판 좌측 상단에 고정
+    COORD pos = { 0, 0 }; // 좌측 상단
+    SetConsoleCursorPosition(GetStdHandle(STD_OUTPUT_HANDLE), pos);
+    printf("남은 시간: %2d초  ", remain); // 남은 자리 공백으로 덮어쓰기
 }
 
 /*===============랭킹 관련 함수===============*/
