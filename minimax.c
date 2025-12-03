@@ -76,7 +76,6 @@ static void countLine(int board[BOARD_SIZE][BOARD_SIZE], int row, int col, int c
 
 // 보드 상태 평가 함수
 int evaluateBoard(int board[BOARD_SIZE][BOARD_SIZE], int aiColor) {
-    int opponent = (aiColor == BLACK) ? WHITE : BLACK;
     int score = 0;
 
     // 패턴 점수 정의
@@ -285,22 +284,20 @@ Move findBestMove(int board[BOARD_SIZE][BOARD_SIZE], int aiColor, int difficulty
     int moveCount = getPossibleMoves(board, possibleMoves, 20);
     Move bestMove = { -1, -1 };
 
-    // 상대의 4목을 막아야 하는 경우 찾기
-    for (int i = 0; i < moveCount; i++) {
-        int row = possibleMoves[i].row;
-        int col = possibleMoves[i].col;
-
-        board[row][col] = opponent;
-        if (checkWinBoard(board, row, col, opponent)) {
-            board[row][col] = EMPTY;
-            bestMove.row = row;
-            bestMove.col = col;
-            return bestMove; // 즉시 막기
-        }
-        board[row][col] = EMPTY;
+    // 후보가 없으면 중앙 반환
+    if (moveCount == 0) {
+        bestMove.row = BOARD_SIZE / 2;
+        bestMove.col = BOARD_SIZE / 2;
+        return bestMove;
     }
 
-    // AI가 즉시 이길 수 있는 경우 찾기
+    // Easy 난이도: 30% 확률로 랜덤 실수 (즉시 승리/방어 상황 제외)
+    if (difficulty == EASY && (rand() % 100) < 30) {
+        int randomIndex = rand() % ((moveCount < 5) ? moveCount : 5);
+        return possibleMoves[randomIndex];
+    }
+
+    // 1순위: AI가 즉시 이길 수 있는 경우 (공격 우선)
     for (int i = 0; i < moveCount; i++) {
         int row = possibleMoves[i].row;
         int col = possibleMoves[i].col;
@@ -315,14 +312,23 @@ Move findBestMove(int board[BOARD_SIZE][BOARD_SIZE], int aiColor, int difficulty
         board[row][col] = EMPTY;
     }
 
-    // Minimax 알고리즘으로 최적 수 찾기
-    MoveResult result = minimax(board, depth, INT_MIN, INT_MAX, 1, aiColor);
+    // 2순위: 상대의 4목을 막아야 하는 경우 (방어)
+    for (int i = 0; i < moveCount; i++) {
+        int row = possibleMoves[i].row;
+        int col = possibleMoves[i].col;
 
-    // Easy 난이도: 30% 확률로 랜덤 실수
-    if (difficulty == 0 && (rand() % 100) < 30) {
-        int randomIndex = rand() % ((moveCount < 5) ? moveCount : 5);
-        return possibleMoves[randomIndex];
+        board[row][col] = opponent;
+        if (checkWinBoard(board, row, col, opponent)) {
+            board[row][col] = EMPTY;
+            bestMove.row = row;
+            bestMove.col = col;
+            return bestMove; // 즉시 막기
+        }
+        board[row][col] = EMPTY;
     }
+
+    // 3순위: Minimax 알고리즘으로 최적 수 찾기
+    MoveResult result = minimax(board, depth, INT_MIN, INT_MAX, 1, aiColor);
 
     bestMove.row = result.row;
     bestMove.col = result.col;
