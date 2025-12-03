@@ -55,6 +55,23 @@ int difficulty = MEDIUM; // AI 난이도 (기본: 중간)
 int lastMoveX = -1, lastMoveY = -1;
 char player_nickname[50] = "Player";
 
+/*============= AI 관련 =====================*/
+static const int DX[] = { 1, 0, 1, 1 };
+static const int DY[] = { 0, 1, 1, -1 };
+typedef enum {
+    SCORE_FIVE = 1000000,   // 5목 (즉시 승리)
+    SCORE_OPEN_FOUR = 100000,    // 열린 4 (막을 수 없음)
+    SCORE_FOUR = 15000,     // 닫힌 4 (한쪽 막힘)
+    SCORE_OPEN_THREE = 5000,      // 열린 3
+    SCORE_THREE = 800,       // 닫힌 3
+    SCORE_OPEN_TWO = 300,       // 열린 2
+    SCORE_TWO = 50,        // 닫힌 2
+    SCORE_ONE = 10         // 1개
+} PatternScore;
+
+// 위치 가중치 (중앙 우선)
+static int positionWeight[BOARD_SIZE][BOARD_SIZE];
+static int initialized = 0;
 
 typedef struct{
     int board[SAVE_BOARD_SIZE][SAVE_BOARD_SIZE];
