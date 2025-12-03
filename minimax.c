@@ -74,12 +74,54 @@ static void countLine(int board[BOARD_SIZE][BOARD_SIZE], int row, int col, int c
     }
 }
 
+// 특정 위치의 위협 점수 계산 (착수 전 빈 칸 상태에서 호출)
+static int evaluatePosition(int board[BOARD_SIZE][BOARD_SIZE], int row, int col, int color) {
+    int score = 0;
+    int open4 = 0, closed4 = 0, open3 = 0, closed3 = 0, open2 = 0;
+
+    // 임시로 돌 배치
+    board[row][col] = color;
+
+    for (int dir = 0; dir < 4; dir++) {
+        int count, openEnds;
+        countLine(board, row, col, color, dir, &count, &openEnds);
+
+        if (count >= 5) {
+            board[row][col] = EMPTY;
+            return 1000000; // 즉시 승리
+        } else if (count == 4) {
+            if (openEnds == 2) open4++;
+            else if (openEnds == 1) closed4++;
+        } else if (count == 3) {
+            if (openEnds == 2) open3++;
+            else if (openEnds == 1) closed3++;
+        } else if (count == 2) {
+            if (openEnds == 2) open2++;
+        }
+    }
+
+    // 돌 제거
+    board[row][col] = EMPTY;
+
+    // 패턴 조합 점수
+    if (open4 >= 1) score = 100000;           // 열린 4 = 승리 확정
+    else if (closed4 >= 2) score = 100000;    // 쌍사 (닫힌4 2개) = 승리 확정
+    else if (closed4 >= 1 && open3 >= 1) score = 100000; // 사삼 = 승리 확정
+    else if (open3 >= 2) score = 50000;       // 쌍삼 = 매우 강력
+    else if (closed4 >= 1) score = 10000;     // 닫힌 4
+    else if (open3 >= 1) score = 5000;        // 열린 3
+    else if (closed3 >= 2) score = 3000;      // 닫힌 3 두개
+    else if (closed3 >= 1) score = 500;       // 닫힌 3
+    else if (open2 >= 2) score = 300;         // 열린 2 두개
+    else if (open2 >= 1) score = 100;         // 열린 2
+    else score = 10;
+
+    return score;
+}
+
 // 보드 상태 평가 함수
 int evaluateBoard(int board[BOARD_SIZE][BOARD_SIZE], int aiColor) {
     int score = 0;
-
-    // 패턴 점수 정의 (방어에 더 높은 가중치)
-    // 상대 위협은 1.5배 가중치로 계산하여 방어 우선
 
     for (int row = 0; row < BOARD_SIZE; row++) {
         for (int col = 0; col < BOARD_SIZE; col++) {
@@ -99,28 +141,25 @@ int evaluateBoard(int board[BOARD_SIZE][BOARD_SIZE], int aiColor) {
                     if (board[prevY][prevX] == color) continue;
                 }
 
-                // 패턴별 점수 부여
+                // 패턴별 점수 부여 (방어에 더 높은 가중치)
+                int patternScore = 0;
                 if (count >= 5) {
-                    score += isAI ? 100000 : -100000;
+                    patternScore = 1000000;
                 } else if (count == 4) {
-                    if (openEnds == 2) {
-                        score += isAI ? 50000 : -80000;   // 열린 4 (상대것 더 위험)
-                    } else if (openEnds == 1) {
-                        score += isAI ? 5000 : -8000;     // 닫힌 4
-                    }
+                    if (openEnds == 2) patternScore = 100000;     // 열린 4
+                    else if (openEnds == 1) patternScore = 15000; // 닫힌 4
                 } else if (count == 3) {
-                    if (openEnds == 2) {
-                        score += isAI ? 5000 : -8000;     // 열린 3 (매우 위험)
-                    } else if (openEnds == 1) {
-                        score += isAI ? 500 : -800;       // 닫힌 3
-                    }
+                    if (openEnds == 2) patternScore = 10000;      // 열린 3
+                    else if (openEnds == 1) patternScore = 1000;  // 닫힌 3
                 } else if (count == 2) {
-                    if (openEnds == 2) {
-                        score += isAI ? 200 : -300;       // 열린 2
-                    } else if (openEnds == 1) {
-                        score += isAI ? 50 : -80;         // 닫힌 2
-                    }
+                    if (openEnds == 2) patternScore = 500;        // 열린 2
+                    else if (openEnds == 1) patternScore = 50;    // 닫힌 2
+                } else if (count == 1) {
+                    if (openEnds == 2) patternScore = 20;         // 열린 1
                 }
+
+                // 상대 패턴은 1.2배 가중치로 방어 우선
+                score += isAI ? patternScore : (int)(-patternScore * 1.2);
             }
         }
     }
@@ -282,21 +321,16 @@ MoveResult minimax(int board[BOARD_SIZE][BOARD_SIZE], int depth, int alpha, int 
     }
 }
 
-// 특정 위치에 착수했을 때 열린 4 또는 열린 3이 형성되는지 확인
-static int checkThreat(int board[BOARD_SIZE][BOARD_SIZE], int row, int col, int color, int threatLevel) {
-    // threatLevel: 4 = 열린4/닫힌4 확인, 3 = 열린3 확인
-    for (int dir = 0; dir < 4; dir++) {
-        int count, openEnds;
-        countLine(board, row, col, color, dir, &count, &openEnds);
+// 착수 후보들을 점수순으로 정렬하기 위한 구조체
+typedef struct {
+    int row;
+    int col;
+    int score;
+} ScoredMove;
 
-        if (threatLevel == 4 && count >= 4 && openEnds >= 1) {
-            return 1; // 4목 위협 (열린 또는 닫힌)
-        }
-        if (threatLevel == 3 && count >= 3 && openEnds == 2) {
-            return 1; // 열린 3목 위협
-        }
-    }
-    return 0;
+// 점수 비교 함수 (내림차순)
+static int compareMoves(const void* a, const void* b) {
+    return ((ScoredMove*)b)->score - ((ScoredMove*)a)->score;
 }
 
 // AI의 최적 착수 찾기
@@ -307,7 +341,7 @@ Move findBestMove(int board[BOARD_SIZE][BOARD_SIZE], int aiColor, int difficulty
 
     int opponent = (aiColor == BLACK) ? WHITE : BLACK;
     Move possibleMoves[MAX_MOVES];
-    int moveCount = getPossibleMoves(board, possibleMoves, 30);
+    int moveCount = getPossibleMoves(board, possibleMoves, 50);
     Move bestMove = { -1, -1 };
 
     // 후보가 없으면 중앙 반환
@@ -323,100 +357,97 @@ Move findBestMove(int board[BOARD_SIZE][BOARD_SIZE], int aiColor, int difficulty
         return possibleMoves[randomIndex];
     }
 
-    // 1순위: AI가 즉시 이길 수 있는 경우 (5목)
+    // 각 후보 위치의 공격/방어 점수 계산
+    ScoredMove scoredMoves[MAX_MOVES];
+    int bestAttackScore = 0, bestDefenseScore = 0;
+    int bestAttackIdx = -1, bestDefenseIdx = -1;
+
     for (int i = 0; i < moveCount; i++) {
         int row = possibleMoves[i].row;
         int col = possibleMoves[i].col;
+
+        // 공격 점수 (AI가 여기 두면 얼마나 좋은가)
+        int attackScore = evaluatePosition(board, row, col, aiColor);
+        // 방어 점수 (상대가 여기 두면 얼마나 위험한가)
+        int defenseScore = evaluatePosition(board, row, col, opponent);
+
+        // 즉시 승리 가능하면 바로 반환
+        if (attackScore >= 1000000) {
+            bestMove.row = row;
+            bestMove.col = col;
+            return bestMove;
+        }
+
+        // 상대 즉시 승리 막기
+        if (defenseScore >= 1000000) {
+            if (bestDefenseIdx == -1) {
+                bestDefenseIdx = i;
+                bestDefenseScore = defenseScore;
+            }
+        }
+
+        // 최고 공격 수 추적
+        if (attackScore > bestAttackScore) {
+            bestAttackScore = attackScore;
+            bestAttackIdx = i;
+        }
+        // 최고 방어 수 추적
+        if (defenseScore > bestDefenseScore) {
+            bestDefenseScore = defenseScore;
+            bestDefenseIdx = i;
+        }
+
+        // 종합 점수 (공격 + 방어 * 1.1)
+        scoredMoves[i].row = row;
+        scoredMoves[i].col = col;
+        scoredMoves[i].score = attackScore + (int)(defenseScore * 1.1);
+    }
+
+    // 상대가 즉시 이길 수 있는 곳이 있으면 막기
+    if (bestDefenseScore >= 1000000 && bestDefenseIdx >= 0) {
+        bestMove.row = possibleMoves[bestDefenseIdx].row;
+        bestMove.col = possibleMoves[bestDefenseIdx].col;
+        return bestMove;
+    }
+
+    // 강력한 공격 수가 있으면 (쌍삼, 사삼 등)
+    if (bestAttackScore >= 50000 && bestAttackIdx >= 0) {
+        bestMove.row = possibleMoves[bestAttackIdx].row;
+        bestMove.col = possibleMoves[bestAttackIdx].col;
+        return bestMove;
+    }
+
+    // 상대의 강력한 위협이 있으면 막기
+    if (bestDefenseScore >= 50000 && bestDefenseIdx >= 0) {
+        bestMove.row = possibleMoves[bestDefenseIdx].row;
+        bestMove.col = possibleMoves[bestDefenseIdx].col;
+        return bestMove;
+    }
+
+    // 점수순 정렬 후 상위 후보만 Minimax 탐색
+    qsort(scoredMoves, moveCount, sizeof(ScoredMove), compareMoves);
+
+    // 상위 N개만 Minimax로 심층 탐색
+    int searchCount = (moveCount < 15) ? moveCount : 15;
+    int maxScore = INT_MIN;
+
+    for (int i = 0; i < searchCount; i++) {
+        int row = scoredMoves[i].row;
+        int col = scoredMoves[i].col;
 
         board[row][col] = aiColor;
-        if (checkWinBoard(board, row, col, aiColor)) {
-            board[row][col] = EMPTY;
+        MoveResult result = minimax(board, depth - 1, INT_MIN, INT_MAX, 0, aiColor);
+        board[row][col] = EMPTY;
+
+        // 휴리스틱 점수 가산
+        int totalScore = result.score + scoredMoves[i].score / 10;
+
+        if (totalScore > maxScore) {
+            maxScore = totalScore;
             bestMove.row = row;
             bestMove.col = col;
-            return bestMove;
         }
-        board[row][col] = EMPTY;
     }
 
-    // 2순위: 상대의 5목 막기
-    for (int i = 0; i < moveCount; i++) {
-        int row = possibleMoves[i].row;
-        int col = possibleMoves[i].col;
-
-        board[row][col] = opponent;
-        if (checkWinBoard(board, row, col, opponent)) {
-            board[row][col] = EMPTY;
-            bestMove.row = row;
-            bestMove.col = col;
-            return bestMove;
-        }
-        board[row][col] = EMPTY;
-    }
-
-    // 3순위: AI 열린 4 또는 닫힌 4 만들기
-    for (int i = 0; i < moveCount; i++) {
-        int row = possibleMoves[i].row;
-        int col = possibleMoves[i].col;
-
-        board[row][col] = aiColor;
-        if (checkThreat(board, row, col, aiColor, 4)) {
-            board[row][col] = EMPTY;
-            bestMove.row = row;
-            bestMove.col = col;
-            return bestMove;
-        }
-        board[row][col] = EMPTY;
-    }
-
-    // 4순위: 상대 열린 4/닫힌 4 막기
-    for (int i = 0; i < moveCount; i++) {
-        int row = possibleMoves[i].row;
-        int col = possibleMoves[i].col;
-
-        board[row][col] = opponent;
-        if (checkThreat(board, row, col, opponent, 4)) {
-            board[row][col] = EMPTY;
-            bestMove.row = row;
-            bestMove.col = col;
-            return bestMove;
-        }
-        board[row][col] = EMPTY;
-    }
-
-    // 5순위: AI 열린 3 만들기
-    for (int i = 0; i < moveCount; i++) {
-        int row = possibleMoves[i].row;
-        int col = possibleMoves[i].col;
-
-        board[row][col] = aiColor;
-        if (checkThreat(board, row, col, aiColor, 3)) {
-            board[row][col] = EMPTY;
-            bestMove.row = row;
-            bestMove.col = col;
-            return bestMove;
-        }
-        board[row][col] = EMPTY;
-    }
-
-    // 6순위: 상대 열린 3 막기
-    for (int i = 0; i < moveCount; i++) {
-        int row = possibleMoves[i].row;
-        int col = possibleMoves[i].col;
-
-        board[row][col] = opponent;
-        if (checkThreat(board, row, col, opponent, 3)) {
-            board[row][col] = EMPTY;
-            bestMove.row = row;
-            bestMove.col = col;
-            return bestMove;
-        }
-        board[row][col] = EMPTY;
-    }
-
-    // 7순위: Minimax 알고리즘으로 최적 수 찾기
-    MoveResult result = minimax(board, depth, INT_MIN, INT_MAX, 1, aiColor);
-
-    bestMove.row = result.row;
-    bestMove.col = result.col;
     return bestMove;
 }
