@@ -1385,12 +1385,6 @@ int main() {
         printf("프로그램을 종료합니다...");
         return 0;
     }
-    SaveData currentData;
-    for (int i = 0; i < SAVE_BOARD_SIZE; i++)
-        for (int j = 0; j < SAVE_BOARD_SIZE; j++)
-            currentData.board[i][j] = (i < SIZE && j < SIZE) ? board[i][j] : 0;
-    currentData.currentTurn = currentPlayer;
-    currentData.gameMode = gameMode;
 
     if(gameMode == 1 || gameMode == 2 || gameMode == 3){
         if(gameEndedByVictory == 0){
