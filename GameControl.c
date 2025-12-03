@@ -209,6 +209,7 @@ void gameLoop() {
 int main() {
     srand((unsigned int)time(NULL));
     initBoard();
+    initAI();  // AI 엔진 초기화
 
     printf("\n=========시작화면=======\n");
     printf("1. 1인용 게임 \n");
@@ -256,7 +257,8 @@ int main() {
 
 
     printf("\n게임이 종료되었습니다. 아무 키나 누르면 콘솔이 닫힙니다...\n");
-    _getch(); 
+    _getch();
 
+    cleanupAI();  // AI 엔진 정리 (메모리 해제)
     return 0;
 }

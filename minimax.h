@@ -27,6 +27,9 @@ typedef struct {
 } MoveResult;
 
 // 함수 선언
+void initAI(void);      // AI 초기화 (Transposition Table, Zobrist 등)
+void cleanupAI(void);   // AI 정리 (메모리 해제)
+
 int checkWinBoard(int board[BOARD_SIZE][BOARD_SIZE], int row, int col, int color);
 int evaluateBoard(int board[BOARD_SIZE][BOARD_SIZE], int aiColor);
 int getPossibleMoves(int board[BOARD_SIZE][BOARD_SIZE], Move moves[], int maxCount);
