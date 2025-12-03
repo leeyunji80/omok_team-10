@@ -17,27 +17,33 @@ void update_game_result(const char* nickname, int did_win) {
     char date_str[10];
     sprintf_s(date_str, sizeof(date_str), "%02d/%02d", tm.tm_mon + 1, tm.tm_mday);
 
-    fopen_s(&fp, "user_data.json", "r");
-
-    fseek(fp, 0, SEEK_END);
-    length = ftell(fp);
-    fseek(fp, 0, SEEK_SET);
-
-    if (length > 0) {
-        buffer = (char*)malloc(length + 1);
-        if (buffer) {
-            size_t read_bytes = fread(buffer, 1, length, fp);
-            buffer[read_bytes] = '\0';
-        }
-    }
-    fclose(fp);
-
-    if (buffer == NULL) {
+    if (fopen_s(&fp, "user_data.json", "r") != 0 || fp == NULL) {
         root = cJSON_CreateArray();
     }
     else {
-        root = cJSON_Parse(buffer);
-        free(buffer);
+        fseek(fp, 0, SEEK_END);
+        length = ftell(fp);
+        fseek(fp, 0, SEEK_SET);
+
+        if (length > 0) {
+            buffer = (char*)malloc(length + 1);
+            if (buffer) {
+                size_t read_bytes = fread(buffer, 1, length, fp);
+                buffer[read_bytes] = '\0';
+            }
+        }
+        fclose(fp);
+
+        if (buffer == NULL) {
+            root = cJSON_CreateArray();
+        }
+        else {
+            root = cJSON_Parse(buffer);
+            free(buffer);
+            if (root == NULL) {
+                root = cJSON_CreateArray();
+            }
+        }
     }
 
     int found = 0;

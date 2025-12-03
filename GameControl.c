@@ -1,5 +1,6 @@
 #define _CRT_SECURE_NO_WARNINGS
 #include <stdio.h>
+<<<<<<< HEAD
 #include <stdlib.h>
 #include "cJSON.h"
 #include <conio.h>
