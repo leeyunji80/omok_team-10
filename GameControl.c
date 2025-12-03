@@ -54,6 +54,7 @@ int gameMode = 0; // 1=1인용, 2=2인용
 int difficulty = MEDIUM; // AI 난이도 (기본: 중간)
 int lastMoveX = -1, lastMoveY = -1;
 char player_nickname[50] = "Player";
+DWORD lastTick = 0;
 int gameEndedByVictory = 0;
 
 /*============= AI 관련 =====================*/
@@ -671,6 +672,20 @@ void initBoard() {
             board[y][x] = EMPTY;
     cursorX = 0;
     cursorY = 0;
+}
+
+void printTemporaryMessage(const char* msg, int seconds) {
+    printf("\n%s", msg);
+    fflush(stdout);
+    DWORD start = GetTickCount();
+    while (GetTickCount() - start < seconds * 1000) {
+        Sleep(50); // 메시지 표시 시간 동안 CPU 부담 최소화
+    }
+    // 메시지 지우기
+    printf("\r");
+    for (int i = 0; i < 80; i++) printf(" ");
+    printf("\r");
+    fflush(stdout);
 }
 
 // 보드 출력
