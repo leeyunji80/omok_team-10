@@ -226,7 +226,7 @@ typedef struct {
 void get_filename(char* buffer) {
     time_t t = time(NULL);
     struct tm tm = *localtime(&t);
-    sprintf(buffer, "%04d%02d%02d_%02d%02d%02d.dat",
+    sprintf(buffer, "%04d년%02d월%02d일_%02d시%02d분%02d초.dat",
         tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday,
         tm.tm_hour, tm.tm_min, tm.tm_sec);
 }
