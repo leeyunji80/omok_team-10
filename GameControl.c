@@ -1297,6 +1297,9 @@ int main() {
 
     HandleExit(&currentData);
     }
+
+     printf("\n게임이 종료되었습니다. 아무 키나 누르면 콘솔이 닫힙니다...\n");
+     _getch();
     cleanpAI();
     return 0;
 }
