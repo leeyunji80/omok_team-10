@@ -8,6 +8,7 @@
 #include <windows.h>
 #include <ctype.h>
 #include <string.h>
+#include "minimax.h"
 
 #define SIZE 15
 #define BLACK 1
@@ -35,6 +36,32 @@ typedef struct{
     int col;
 }Move;
 
+#ifdef _WIN32
+    #include <conio.h>
+    #include <windows.h>
+#else
+    #include <termios.h>
+    #include <unistd.h>
+
+    // Unix/macOS용 getch 구현
+    int _getch(void) {
+        struct termios oldattr, newattr;
+        int ch;
+        tcgetattr(STDIN_FILENO, &oldattr);
+        newattr = oldattr;
+        newattr.c_lflag &= ~(ICANON | ECHO);
+        tcsetattr(STDIN_FILENO, TCSANOW, &newattr);
+        ch = getchar();
+        tcsetattr(STDIN_FILENO, TCSANOW, &oldattr);
+        return ch;
+    }
+
+    // Unix/macOS용 Sleep 구현 (밀리초)
+    void Sleep(int ms) {
+        usleep(ms * 1000);
+    }
+#endif
+
 /*==========전역 변수 상태=============*/
 int board[SIZE][SIZE];
 int cursorX = 0, cursorY = 0;
@@ -61,10 +88,38 @@ void HandleExit(const SaveData* currentData);
 void ResetGame(SaveData* data);
 void update_game_result(const char* nickname, int did_win);
 void print_rankings(void);
+void gotoxy(int x, int y);
+void hideCursor(int hide);
 
+
+void gotoxy(int x, int y) {
+#ifdef _WIN32
+    COORD pos = {x, y};
+    SetConsoleCursorPosition(GetStdHandle(STD_OUTPUT_HANDLE), pos);
+#else
+    printf("\033[%d;%dH", y + 1, x + 1);
+#endif
+}
+
+void hideCursor(int hide) {
+#ifdef _WIN32
+    HANDLE consoleHandle = GetStdHandle(STD_OUTPUT_HANDLE);
+    CONSOLE_CURSOR_INFO info;
+    GetConsoleCursorInfo(consoleHandle, &info);
+    info.bVisible = !hide;
+    SetConsoleCursorInfo(consoleHandle, &info);
+#else
+    if (hide) printf("\033[?25l");
+    else printf("\033[?25h");
+#endif
+}
 
 void clearScreen() {
+#ifdef _WIN32
     system("cls");
+#else
+    system("clear");
+#endif
 }
 
 void initBoard() {
@@ -137,7 +192,10 @@ int placeStone(int x, int y) {
 }
 
 void aiMove() {
-/*Ai프로그램 작성*/
+    Move bestMove = findBestMove(board, WHITE, difficulty);
+    if (bestMove.row >= 0 && bestMove.col >= 0) {
+        placeStone(bestMove.col, bestMove.row);
+    }
 }
 
 // 승리 체크
@@ -527,7 +585,7 @@ int LoadSelectedGame() {
 /*========================메뉴==========================*/
 void showMenu() {
     int choice;
-    while(1){
+    hideCursor(0);
     clearScreen();
     printf("========== 메뉴 ==========\n");
     printf("1. 게임 저장\n");
@@ -552,10 +610,12 @@ void showMenu() {
     default: printf("잘못된 선택입니다.\n"); Sleep(600); break;
     }
   }
-}
+
 
 // 메인 게임 루프
 void gameLoop() {
+    clearScreen();
+    hideCursor(1);
     printBoard();
     int key;
 
@@ -585,6 +645,7 @@ void gameLoop() {
                 printBoard();
                 int winner = checkWinGameplay(lastMoveX, lastMoveY);
                 if (winner != 0) {
+                    hideCursor(0);
                     printf("%s 승리! 게임이 종료되었습니다.\n", (winner == BLACK) ? "흑" : "백");
                     if(gameMode == 1){
                         if(winner == BLACK){fflush(stdin);
@@ -621,6 +682,20 @@ int main() {
     scanf("%d", &gameMode);
 
     if(gameMode == 1){
+        int diffChoice;
+        printf("\n======= 난이도 선택 =======\n");
+        printf("1. 쉬움 (Easy)\n");
+        printf("2. 보통 (Medium)\n");
+        printf("3. 어려움 (Hard)\n");
+        printf("===========================\n");
+        printf("난이도를 선택하세요 (1~3): ");
+        scanf("%d", &diffChoice);
+        switch(diffChoice) {
+            case 1: difficulty = EASY; break;
+            case 2: difficulty = MEDIUM; break;
+            case 3: difficulty = HARD; break;
+            default: difficulty = MEDIUM; break;
+        }
         gameLoop();
     }
     else if(gameMode == 2){
@@ -661,5 +736,6 @@ int main() {
 
     HandleExit(&currentData);
     }
+    cleanpAI();
     return 0;
 }
