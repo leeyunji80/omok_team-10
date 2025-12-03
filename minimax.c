@@ -1,12 +1,5 @@
-// 고급 Minimax 알고리즘 기반 오목 AI (개선 버전)
-// 주요 개선사항:
-// - Transposition Table (Zobrist Hashing)
-// - Iterative Deepening with Time Management
-// - 향상된 패턴 인식 (빈 칸 포함 패턴)
-// - VCF (Victory by Continuous Four) 탐지
-// - 위치 가중치 (중앙 우선)
-// - Killer Heuristic & History Heuristic
-// - Principal Variation Search (PVS)
+// 오목 AI - 단순화된 Minimax + Alpha-Beta Pruning
+// 핵심: 빠른 연산, 정확한 패턴 인식, 효과적인 방어/공격
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -15,174 +8,76 @@
 #include <time.h>
 #include "minimax.h"
 
-#define MAX_MOVES 225
-#define TT_SIZE (1 << 20)  // Transposition Table 크기 (약 100만 엔트리)
-#define MAX_DEPTH 12
+#define MAX_MOVES 60
 #define INFINITY_SCORE 10000000
 
 // 방향 벡터 (가로, 세로, 대각선 2개)
-static const int dx[] = { 1, 0, 1, 1 };
-static const int dy[] = { 0, 1, 1, -1 };
+static const int DX[] = {1, 0, 1, 1};
+static const int DY[] = {0, 1, 1, -1};
 
-// 위치 가중치 테이블 (중앙이 높은 점수)
-static int positionWeight[BOARD_SIZE][BOARD_SIZE];
-
-// Zobrist 해싱용 랜덤 테이블
-static unsigned long long zobristTable[BOARD_SIZE][BOARD_SIZE][3];
-static unsigned long long currentHash = 0;
-
-// Transposition Table 엔트리
-typedef struct {
-    unsigned long long hash;
-    int depth;
-    int score;
-    int flag;  // 0: EXACT, 1: LOWERBOUND, 2: UPPERBOUND
-    int bestRow;
-    int bestCol;
-} TTEntry;
-
-static TTEntry* transpositionTable = NULL;
-
-// Killer Moves (각 깊이별 2개)
-static Move killerMoves[MAX_DEPTH][2];
-
-// History Heuristic 테이블
-static int historyTable[BOARD_SIZE][BOARD_SIZE];
-
-// 패턴 점수 상수 (더 세분화)
+// 패턴 점수
 typedef enum {
-    PATTERN_FIVE = 1000000,        // 5목
-    PATTERN_OPEN_FOUR = 100000,    // 열린 4 (양쪽 열림)
-    PATTERN_DOUBLE_FOUR = 100000,  // 쌍사
-    PATTERN_FOUR_THREE = 100000,   // 사삼
-    PATTERN_CLOSED_FOUR = 15000,   // 닫힌 4 (한쪽만 열림)
-    PATTERN_DOUBLE_THREE = 50000,  // 쌍삼
-    PATTERN_OPEN_THREE = 8000,     // 열린 3
-    PATTERN_JUMP_THREE = 6000,     // 띈 3 (O_OO, OO_O)
-    PATTERN_CLOSED_THREE = 1500,   // 닫힌 3
-    PATTERN_OPEN_TWO = 500,        // 열린 2
-    PATTERN_JUMP_TWO = 300,        // 띈 2
-    PATTERN_CLOSED_TWO = 100,      // 닫힌 2
-    PATTERN_ONE = 10               // 단일
+    SCORE_FIVE      = 1000000,   // 5목 (즉시 승리)
+    SCORE_OPEN_FOUR = 100000,    // 열린 4 (막을 수 없음)
+    SCORE_FOUR      = 15000,     // 닫힌 4 (한쪽 막힘)
+    SCORE_OPEN_THREE= 5000,      // 열린 3
+    SCORE_THREE     = 800,       // 닫힌 3
+    SCORE_OPEN_TWO  = 300,       // 열린 2
+    SCORE_TWO       = 50,        // 닫힌 2
+    SCORE_ONE       = 10         // 1개
 } PatternScore;
 
-// 라인 분석 결과 구조체
-typedef struct {
-    int count;          // 연속된 돌 개수
-    int openEnds;       // 열린 끝 개수
-    int totalLength;    // 빈칸 포함 총 길이
-    int gaps;           // 중간 빈칸 개수
-    int potentialFive;  // 5목 가능 여부
-} LineAnalysis;
+// 위치 가중치 (중앙 우선)
+static int positionWeight[BOARD_SIZE][BOARD_SIZE];
+static int initialized = 0;
 
-// 초기화 함수
+// AI 초기화
 void initAI(void) {
-    // 난수 시드 설정
+    if (initialized) return;
+
     srand((unsigned int)time(NULL));
-    
-    // Transposition Table 할당
-    if (transpositionTable == NULL) {
-        transpositionTable = (TTEntry*)calloc(TT_SIZE, sizeof(TTEntry));
-    }
-    
-    // Zobrist 테이블 초기화
-    for (int i = 0; i < BOARD_SIZE; i++) {
-        for (int j = 0; j < BOARD_SIZE; j++) {
-            for (int k = 0; k < 3; k++) {
-                zobristTable[i][j][k] = ((unsigned long long)rand() << 32) | rand();
-            }
-        }
-    }
-    
+
     // 위치 가중치 초기화 (중앙이 높음)
     int center = BOARD_SIZE / 2;
     for (int i = 0; i < BOARD_SIZE; i++) {
         for (int j = 0; j < BOARD_SIZE; j++) {
             int dist = abs(i - center) + abs(j - center);
-            positionWeight[i][j] = (BOARD_SIZE - dist) * 2;
+            positionWeight[i][j] = (BOARD_SIZE - dist);
         }
     }
-    
-    // Killer Moves 초기화
-    memset(killerMoves, -1, sizeof(killerMoves));
-    
-    // History Table 초기화
-    memset(historyTable, 0, sizeof(historyTable));
+
+    initialized = 1;
 }
 
-// AI 정리 함수
+// AI 정리
 void cleanupAI(void) {
-    if (transpositionTable != NULL) {
-        free(transpositionTable);
-        transpositionTable = NULL;
-    }
+    initialized = 0;
 }
 
-// Zobrist 해시 업데이트
-static void updateHash(int row, int col, int color) {
-    currentHash ^= zobristTable[row][col][color];
-}
-
-// Zobrist 해시 계산 (전체 보드)
-static unsigned long long computeHash(int board[BOARD_SIZE][BOARD_SIZE]) {
-    unsigned long long hash = 0;
-    for (int i = 0; i < BOARD_SIZE; i++) {
-        for (int j = 0; j < BOARD_SIZE; j++) {
-            if (board[i][j] != EMPTY) {
-                hash ^= zobristTable[i][j][board[i][j]];
-            }
-        }
-    }
-    return hash;
-}
-
-// Transposition Table 조회
-static TTEntry* probeTT(unsigned long long hash) {
-    int index = hash % TT_SIZE;
-    TTEntry* entry = &transpositionTable[index];
-    if (entry->hash == hash) {
-        return entry;
-    }
-    return NULL;
-}
-
-// Transposition Table 저장
-static void storeTT(unsigned long long hash, int depth, int score, int flag, int bestRow, int bestCol) {
-    int index = hash % TT_SIZE;
-    TTEntry* entry = &transpositionTable[index];
-    
-    // 더 깊은 탐색 결과만 덮어쓰기
-    if (entry->hash != hash || entry->depth <= depth) {
-        entry->hash = hash;
-        entry->depth = depth;
-        entry->score = score;
-        entry->flag = flag;
-        entry->bestRow = bestRow;
-        entry->bestCol = bestCol;
-    }
-}
-
-// 승리 여부 확인
+// 승리 체크
 int checkWinBoard(int board[BOARD_SIZE][BOARD_SIZE], int row, int col, int color) {
+    if (row < 0 || row >= BOARD_SIZE || col < 0 || col >= BOARD_SIZE) return 0;
     if (board[row][col] != color) return 0;
 
     for (int dir = 0; dir < 4; dir++) {
         int count = 1;
 
-        int nx = col + dx[dir];
-        int ny = row + dy[dir];
+        // 정방향
+        int nx = col + DX[dir];
+        int ny = row + DY[dir];
         while (nx >= 0 && nx < BOARD_SIZE && ny >= 0 && ny < BOARD_SIZE && board[ny][nx] == color) {
             count++;
-            nx += dx[dir];
-            ny += dy[dir];
+            nx += DX[dir];
+            ny += DY[dir];
         }
 
-        nx = col - dx[dir];
-        ny = row - dy[dir];
+        // 역방향
+        nx = col - DX[dir];
+        ny = row - DY[dir];
         while (nx >= 0 && nx < BOARD_SIZE && ny >= 0 && ny < BOARD_SIZE && board[ny][nx] == color) {
             count++;
-            nx -= dx[dir];
-            ny -= dy[dir];
+            nx -= DX[dir];
+            ny -= DY[dir];
         }
 
         if (count >= 5) return 1;
@@ -190,331 +85,174 @@ int checkWinBoard(int board[BOARD_SIZE][BOARD_SIZE], int row, int col, int color
     return 0;
 }
 
-// 향상된 라인 분석 (빈칸 포함 패턴 인식)
-static LineAnalysis analyzeLineAdvanced(int board[BOARD_SIZE][BOARD_SIZE], int row, int col, int color, int dir) {
-    LineAnalysis result = {0, 0, 0, 0, 0};
-    
-    if (board[row][col] != color) return result;
-    
-    result.count = 1;
-    result.totalLength = 1;
-    
-    // 정방향 탐색 (빈칸 하나까지 허용)
-    int nx = col + dx[dir];
-    int ny = row + dy[dir];
-    int gapUsed = 0;
-    int consecutiveEmpty = 0;
-    
-    while (nx >= 0 && nx < BOARD_SIZE && ny >= 0 && ny < BOARD_SIZE) {
-        if (board[ny][nx] == color) {
-            result.count++;
-            result.totalLength++;
-            consecutiveEmpty = 0;
-        } else if (board[ny][nx] == EMPTY) {
-            consecutiveEmpty++;
-            if (consecutiveEmpty > 1) break;  // 연속 빈칸 2개면 중단
-            
-            // 빈칸 다음에 같은 색 돌이 있는지 확인
-            int nnx = nx + dx[dir];
-            int nny = ny + dy[dir];
-            if (nnx >= 0 && nnx < BOARD_SIZE && nny >= 0 && nny < BOARD_SIZE && board[nny][nnx] == color) {
-                if (!gapUsed) {
-                    result.gaps++;
-                    result.totalLength++;
-                    gapUsed = 1;
-                } else {
-                    break;
-                }
-            } else {
-                result.openEnds++;
-                break;
-            }
-        } else {
-            break;  // 상대 돌
-        }
-        nx += dx[dir];
-        ny += dy[dir];
+// 한 방향 라인 분석 (연속 돌 수, 열린 끝 수)
+static void analyzeLine(int board[BOARD_SIZE][BOARD_SIZE], int row, int col,
+                        int dx, int dy, int color, int *count, int *openEnds) {
+    *count = 1;
+    *openEnds = 0;
+
+    // 정방향
+    int nx = col + dx;
+    int ny = row + dy;
+    while (nx >= 0 && nx < BOARD_SIZE && ny >= 0 && ny < BOARD_SIZE && board[ny][nx] == color) {
+        (*count)++;
+        nx += dx;
+        ny += dy;
     }
-    
-    // 정방향 끝이 비어있는지 확인
-    if (nx >= 0 && nx < BOARD_SIZE && ny >= 0 && ny < BOARD_SIZE && board[ny][nx] == EMPTY && consecutiveEmpty == 0) {
-        result.openEnds++;
+    if (nx >= 0 && nx < BOARD_SIZE && ny >= 0 && ny < BOARD_SIZE && board[ny][nx] == EMPTY) {
+        (*openEnds)++;
     }
-    
-    // 역방향 탐색
-    nx = col - dx[dir];
-    ny = row - dy[dir];
-    gapUsed = 0;
-    consecutiveEmpty = 0;
-    
-    while (nx >= 0 && nx < BOARD_SIZE && ny >= 0 && ny < BOARD_SIZE) {
-        if (board[ny][nx] == color) {
-            result.count++;
-            result.totalLength++;
-            consecutiveEmpty = 0;
-        } else if (board[ny][nx] == EMPTY) {
-            consecutiveEmpty++;
-            if (consecutiveEmpty > 1) break;
-            
-            int nnx = nx - dx[dir];
-            int nny = ny - dy[dir];
-            if (nnx >= 0 && nnx < BOARD_SIZE && nny >= 0 && nny < BOARD_SIZE && board[nny][nnx] == color) {
-                if (!gapUsed && result.gaps == 0) {
-                    result.gaps++;
-                    result.totalLength++;
-                    gapUsed = 1;
-                } else {
-                    break;
-                }
-            } else {
-                result.openEnds++;
-                break;
-            }
-        } else {
-            break;
-        }
-        nx -= dx[dir];
-        ny -= dy[dir];
+
+    // 역방향
+    nx = col - dx;
+    ny = row - dy;
+    while (nx >= 0 && nx < BOARD_SIZE && ny >= 0 && ny < BOARD_SIZE && board[ny][nx] == color) {
+        (*count)++;
+        nx -= dx;
+        ny -= dy;
     }
-    
-    if (nx >= 0 && nx < BOARD_SIZE && ny >= 0 && ny < BOARD_SIZE && board[ny][nx] == EMPTY && consecutiveEmpty == 0) {
-        result.openEnds++;
+    if (nx >= 0 && nx < BOARD_SIZE && ny >= 0 && ny < BOARD_SIZE && board[ny][nx] == EMPTY) {
+        (*openEnds)++;
     }
-    
-    // 5목 가능 여부 (빈칸 포함 5칸 이상 연속 공간)
-    result.potentialFive = (result.totalLength + result.openEnds >= 5) ? 1 : 0;
-    
-    return result;
 }
 
-// 특정 위치의 위협 점수 계산 (개선 버전)
-static int evaluatePositionAdvanced(int board[BOARD_SIZE][BOARD_SIZE], int row, int col, int color) {
+// 특정 위치에 돌을 놓았을 때 점수 계산
+static int evaluatePosition(int board[BOARD_SIZE][BOARD_SIZE], int row, int col, int color) {
+    if (board[row][col] != EMPTY) return 0;
+
     int score = 0;
-    int patterns[6] = {0};  // [0]:5목, [1]:열린4, [2]:닫힌4, [3]:열린3, [4]:띈3, [5]:닫힌3
-    
+    int fours = 0;      // 4목 개수
+    int openThrees = 0; // 열린 3 개수
+
     board[row][col] = color;
-    
+
     for (int dir = 0; dir < 4; dir++) {
-        LineAnalysis analysis = analyzeLineAdvanced(board, row, col, color, dir);
-        
-        if (analysis.count >= 5) {
-            patterns[0]++;
-        } else if (analysis.count == 4) {
-            if (analysis.openEnds == 2) patterns[1]++;      // 열린 4
-            else if (analysis.openEnds == 1) patterns[2]++; // 닫힌 4
-        } else if (analysis.count == 3) {
-            if (analysis.gaps > 0) {
-                patterns[4]++;  // 띈 3 (O_OO)
-            } else if (analysis.openEnds == 2) {
-                patterns[3]++;  // 열린 3
-            } else if (analysis.openEnds == 1) {
-                patterns[5]++;  // 닫힌 3
+        int count, openEnds;
+        analyzeLine(board, row, col, DX[dir], DY[dir], color, &count, &openEnds);
+
+        if (count >= 5) {
+            score += SCORE_FIVE;
+        } else if (count == 4) {
+            if (openEnds == 2) {
+                score += SCORE_OPEN_FOUR;  // 열린 4 = 승리 확정
+            } else if (openEnds == 1) {
+                score += SCORE_FOUR;
+                fours++;
             }
-        } else if (analysis.count == 4 && analysis.gaps == 1) {
-            // 띈 4 (OO_OO) - 열린 4와 동등
-            patterns[1]++;
+        } else if (count == 3) {
+            if (openEnds == 2) {
+                score += SCORE_OPEN_THREE;
+                openThrees++;
+            } else if (openEnds == 1) {
+                score += SCORE_THREE;
+            }
+        } else if (count == 2) {
+            if (openEnds == 2) {
+                score += SCORE_OPEN_TWO;
+            } else if (openEnds == 1) {
+                score += SCORE_TWO;
+            }
+        } else if (count == 1) {
+            if (openEnds == 2) {
+                score += SCORE_ONE * 2;
+            } else if (openEnds == 1) {
+                score += SCORE_ONE;
+            }
         }
     }
-    
+
     board[row][col] = EMPTY;
-    
-    // 패턴 조합 점수
-    if (patterns[0] >= 1) return PATTERN_FIVE;
-    if (patterns[1] >= 1) return PATTERN_OPEN_FOUR;
-    if (patterns[2] >= 2) return PATTERN_DOUBLE_FOUR;  // 쌍사
-    if (patterns[2] >= 1 && patterns[3] >= 1) return PATTERN_FOUR_THREE;  // 사삼
-    if (patterns[3] >= 2) return PATTERN_DOUBLE_THREE;  // 쌍삼
-    
-    // 개별 패턴 점수 합산
-    score += patterns[2] * PATTERN_CLOSED_FOUR;
-    score += patterns[3] * PATTERN_OPEN_THREE;
-    score += patterns[4] * PATTERN_JUMP_THREE;
-    score += patterns[5] * PATTERN_CLOSED_THREE;
-    
-    // 위치 가중치 추가
+
+    // 쌍사 (4목 2개 이상) = 승리 확정
+    if (fours >= 2) {
+        score += SCORE_OPEN_FOUR;
+    }
+
+    // 사삼 (4목 + 열린3) = 승리 확정
+    if (fours >= 1 && openThrees >= 1) {
+        score += SCORE_OPEN_FOUR / 2;
+    }
+
+    // 쌍삼 (열린3 2개 이상) = 매우 유리
+    if (openThrees >= 2) {
+        score += SCORE_FOUR;
+    }
+
+    // 위치 가중치
     score += positionWeight[row][col];
-    
-    return score > 0 ? score : 10;
-}
 
-// VCF (Victory by Continuous Four) 탐지
-// 연속적인 4 위협으로 승리 가능한지 확인
-static int detectVCF(int board[BOARD_SIZE][BOARD_SIZE], int color, int depth, int maxDepth) {
-    if (depth > maxDepth) return 0;
-    
-    int opponent = (color == BLACK) ? WHITE : BLACK;
-    
-    // 모든 빈 칸에서 4 위협 찾기
-    for (int row = 0; row < BOARD_SIZE; row++) {
-        for (int col = 0; col < BOARD_SIZE; col++) {
-            if (board[row][col] != EMPTY) continue;
-            
-            int score = evaluatePositionAdvanced(board, row, col, color);
-            
-            // 즉시 승리
-            if (score >= PATTERN_FIVE) return 1;
-            
-            // 열린 4나 쌍사면 승리 확정
-            if (score >= PATTERN_OPEN_FOUR) return 1;
-            
-            // 닫힌 4인 경우 상대 방어 후 계속 공격
-            if (score >= PATTERN_CLOSED_FOUR && score < PATTERN_OPEN_FOUR) {
-                board[row][col] = color;
-                
-                // 상대가 막아야 하는 위치 찾기
-                int blocked = 0;
-                for (int dr = 0; dr < BOARD_SIZE && !blocked; dr++) {
-                    for (int dc = 0; dc < BOARD_SIZE && !blocked; dc++) {
-                        if (board[dr][dc] != EMPTY) continue;
-                        
-                        // 이 위치에 두면 5목이 막히는지 확인
-                        board[dr][dc] = opponent;
-                        int stillWin = 0;
-                        for (int cr = 0; cr < BOARD_SIZE && !stillWin; cr++) {
-                            for (int cc = 0; cc < BOARD_SIZE && !stillWin; cc++) {
-                                if (board[cr][cc] == color) {
-                                    if (checkWinBoard(board, cr, cc, color)) {
-                                        stillWin = 1;
-                                    }
-                                }
-                            }
-                        }
-                        
-                        if (!stillWin) {
-                            // 상대가 여기 막음, 우리가 다시 공격
-                            if (detectVCF(board, color, depth + 1, maxDepth)) {
-                                board[dr][dc] = EMPTY;
-                                board[row][col] = EMPTY;
-                                return 1;
-                            }
-                            blocked = 1;
-                        }
-                        board[dr][dc] = EMPTY;
-                    }
-                }
-                
-                board[row][col] = EMPTY;
-            }
-        }
-    }
-    
-    return 0;
-}
-
-// 간단한 VCF 체크 (성능을 위해 깊이 제한)
-static int quickVCFCheck(int board[BOARD_SIZE][BOARD_SIZE], int color) {
-    return detectVCF(board, color, 0, 4);  // 최대 4수 깊이
-}
-
-// 보드 상태 평가 함수 (개선 버전)
-int evaluateBoard(int board[BOARD_SIZE][BOARD_SIZE], int aiColor) {
-    int score = 0;
-    int opponent = (aiColor == BLACK) ? WHITE : BLACK;
-    
-    // 패턴 카운터
-    int aiPatterns[6] = {0};   // 5, 열린4, 닫힌4, 열린3, 띈3, 닫힌3
-    int oppPatterns[6] = {0};
-    
-    for (int row = 0; row < BOARD_SIZE; row++) {
-        for (int col = 0; col < BOARD_SIZE; col++) {
-            if (board[row][col] == EMPTY) continue;
-            
-            int color = board[row][col];
-            int* patterns = (color == aiColor) ? aiPatterns : oppPatterns;
-            
-            for (int dir = 0; dir < 4; dir++) {
-                // 중복 방지: 시작점에서만 계산
-                int prevX = col - dx[dir];
-                int prevY = row - dy[dir];
-                if (prevX >= 0 && prevX < BOARD_SIZE && prevY >= 0 && prevY < BOARD_SIZE) {
-                    if (board[prevY][prevX] == color) continue;
-                }
-                
-                LineAnalysis analysis = analyzeLineAdvanced(board, row, col, color, dir);
-                
-                if (!analysis.potentialFive) continue;  // 5목 불가능한 라인 무시
-                
-                if (analysis.count >= 5) {
-                    patterns[0]++;
-                } else if (analysis.count == 4) {
-                    if (analysis.openEnds == 2 || analysis.gaps > 0) patterns[1]++;
-                    else if (analysis.openEnds == 1) patterns[2]++;
-                } else if (analysis.count == 3) {
-                    if (analysis.gaps > 0) patterns[4]++;
-                    else if (analysis.openEnds == 2) patterns[3]++;
-                    else if (analysis.openEnds == 1) patterns[5]++;
-                }
-            }
-        }
-    }
-    
-    // AI 점수 계산
-    if (aiPatterns[0] > 0) return INFINITY_SCORE;
-    if (aiPatterns[1] > 0) score += PATTERN_OPEN_FOUR;
-    if (aiPatterns[2] >= 2) score += PATTERN_DOUBLE_FOUR;
-    else score += aiPatterns[2] * PATTERN_CLOSED_FOUR;
-    if (aiPatterns[3] >= 2) score += PATTERN_DOUBLE_THREE;
-    else score += aiPatterns[3] * PATTERN_OPEN_THREE;
-    score += aiPatterns[4] * PATTERN_JUMP_THREE;
-    score += aiPatterns[5] * PATTERN_CLOSED_THREE;
-    
-    // 상대 점수 계산 (1.3배 가중치 - 방어 우선)
-    int oppScore = 0;
-    if (oppPatterns[0] > 0) return -INFINITY_SCORE;
-    if (oppPatterns[1] > 0) oppScore += PATTERN_OPEN_FOUR;
-    if (oppPatterns[2] >= 2) oppScore += PATTERN_DOUBLE_FOUR;
-    else oppScore += oppPatterns[2] * PATTERN_CLOSED_FOUR;
-    if (oppPatterns[3] >= 2) oppScore += PATTERN_DOUBLE_THREE;
-    else oppScore += oppPatterns[3] * PATTERN_OPEN_THREE;
-    oppScore += oppPatterns[4] * PATTERN_JUMP_THREE;
-    oppScore += oppPatterns[5] * PATTERN_CLOSED_THREE;
-    
-    score -= (int)(oppScore * 1.3);
-    
-    // 위치 점수 추가
-    for (int row = 0; row < BOARD_SIZE; row++) {
-        for (int col = 0; col < BOARD_SIZE; col++) {
-            if (board[row][col] == aiColor) {
-                score += positionWeight[row][col];
-            } else if (board[row][col] == opponent) {
-                score -= positionWeight[row][col];
-            }
-        }
-    }
-    
     return score;
 }
 
-// 착수 후보 정렬용 구조체
+// 보드 전체 평가
+int evaluateBoard(int board[BOARD_SIZE][BOARD_SIZE], int aiColor) {
+    int score = 0;
+    int opponent = (aiColor == BLACK) ? WHITE : BLACK;
+
+    for (int row = 0; row < BOARD_SIZE; row++) {
+        for (int col = 0; col < BOARD_SIZE; col++) {
+            if (board[row][col] == EMPTY) continue;
+
+            int color = board[row][col];
+            int sign = (color == aiColor) ? 1 : -1;
+
+            // 각 방향별 분석 (중복 방지: 시작점에서만)
+            for (int dir = 0; dir < 4; dir++) {
+                // 이전 칸에 같은 색 돌이 있으면 스킵 (중복 계산 방지)
+                int px = col - DX[dir];
+                int py = row - DY[dir];
+                if (px >= 0 && px < BOARD_SIZE && py >= 0 && py < BOARD_SIZE) {
+                    if (board[py][px] == color) continue;
+                }
+
+                int count, openEnds;
+                analyzeLine(board, row, col, DX[dir], DY[dir], color, &count, &openEnds);
+
+                int lineScore = 0;
+                if (count >= 5) {
+                    lineScore = SCORE_FIVE;
+                } else if (count == 4) {
+                    if (openEnds == 2) lineScore = SCORE_OPEN_FOUR;
+                    else if (openEnds == 1) lineScore = SCORE_FOUR;
+                } else if (count == 3) {
+                    if (openEnds == 2) lineScore = SCORE_OPEN_THREE;
+                    else if (openEnds == 1) lineScore = SCORE_THREE;
+                } else if (count == 2) {
+                    if (openEnds == 2) lineScore = SCORE_OPEN_TWO;
+                    else if (openEnds == 1) lineScore = SCORE_TWO;
+                }
+
+                score += sign * lineScore;
+            }
+
+            // 위치 가중치
+            score += sign * positionWeight[row][col];
+        }
+    }
+
+    return score;
+}
+
+// 후보 수 구조체
 typedef struct {
     int row;
     int col;
     int score;
-    int isKiller;
-    int historyScore;
 } ScoredMove;
 
-// 착수 후보 비교 함수
-static int compareScoredMoves(const void* a, const void* b) {
-    const ScoredMove* ma = (const ScoredMove*)a;
-    const ScoredMove* mb = (const ScoredMove*)b;
-    
-    // Killer Move 우선
-    if (ma->isKiller != mb->isKiller) return mb->isKiller - ma->isKiller;
-    
-    // 점수순 (내림차순)
-    if (ma->score != mb->score) return mb->score - ma->score;
-    
-    // History Heuristic
-    return mb->historyScore - ma->historyScore;
+// 후보 수 비교 함수
+static int compareMoves(const void *a, const void *b) {
+    return ((ScoredMove*)b)->score - ((ScoredMove*)a)->score;
 }
 
-// 착수 가능한 위치 찾기 (개선 버전)
+// 착수 가능한 위치 찾기
 int getPossibleMoves(int board[BOARD_SIZE][BOARD_SIZE], Move moves[], int maxCount) {
     int visited[BOARD_SIZE][BOARD_SIZE] = {0};
-    int moveCount = 0;
+    ScoredMove candidates[225];
+    int candidateCount = 0;
     int hasStone = 0;
 
+    // 기존 돌 주변 2칸 이내만 탐색
     for (int row = 0; row < BOARD_SIZE; row++) {
         for (int col = 0; col < BOARD_SIZE; col++) {
             if (board[row][col] != EMPTY) {
@@ -526,11 +264,11 @@ int getPossibleMoves(int board[BOARD_SIZE][BOARD_SIZE], Move moves[], int maxCou
                         if (nr >= 0 && nr < BOARD_SIZE && nc >= 0 && nc < BOARD_SIZE) {
                             if (board[nr][nc] == EMPTY && !visited[nr][nc]) {
                                 visited[nr][nc] = 1;
-                                if (moveCount < maxCount) {
-                                    moves[moveCount].row = nr;
-                                    moves[moveCount].col = nc;
-                                    moveCount++;
-                                }
+                                candidates[candidateCount].row = nr;
+                                candidates[candidateCount].col = nc;
+                                // 간단한 우선순위 (중앙에 가까울수록)
+                                candidates[candidateCount].score = positionWeight[nr][nc];
+                                candidateCount++;
                             }
                         }
                     }
@@ -539,364 +277,273 @@ int getPossibleMoves(int board[BOARD_SIZE][BOARD_SIZE], Move moves[], int maxCou
         }
     }
 
+    // 보드가 비어있으면 중앙
     if (!hasStone) {
         moves[0].row = BOARD_SIZE / 2;
         moves[0].col = BOARD_SIZE / 2;
         return 1;
     }
 
-    return moveCount;
-}
-
-// 착수 후보 정렬 (개선된 Move Ordering)
-static int getSortedMoves(int board[BOARD_SIZE][BOARD_SIZE], ScoredMove moves[], 
-                          int aiColor, int depth, int maxCount, Move* ttMove) {
-    Move rawMoves[MAX_MOVES];
-    int rawCount = getPossibleMoves(board, rawMoves, MAX_MOVES);
-    
-    int opponent = (aiColor == BLACK) ? WHITE : BLACK;
-    int moveCount = 0;
-    
-    for (int i = 0; i < rawCount && moveCount < maxCount; i++) {
-        int row = rawMoves[i].row;
-        int col = rawMoves[i].col;
-        
-        moves[moveCount].row = row;
-        moves[moveCount].col = col;
-        
-        // 공격 및 방어 점수
-        int attackScore = evaluatePositionAdvanced(board, row, col, aiColor);
-        int defenseScore = evaluatePositionAdvanced(board, row, col, opponent);
-        moves[moveCount].score = attackScore + (int)(defenseScore * 1.1);
-        
-        // Transposition Table의 최선 수
-        if (ttMove && ttMove->row == row && ttMove->col == col) {
-            moves[moveCount].score += 1000000;
-        }
-        
-        // Killer Move 체크
-        moves[moveCount].isKiller = 0;
-        if (depth < MAX_DEPTH) {
-            if ((killerMoves[depth][0].row == row && killerMoves[depth][0].col == col) ||
-                (killerMoves[depth][1].row == row && killerMoves[depth][1].col == col)) {
-                moves[moveCount].isKiller = 1;
-            }
-        }
-        
-        // History Heuristic
-        moves[moveCount].historyScore = historyTable[row][col];
-        
-        moveCount++;
-    }
-    
     // 정렬
-    qsort(moves, moveCount, sizeof(ScoredMove), compareScoredMoves);
-    
-    return moveCount;
+    qsort(candidates, candidateCount, sizeof(ScoredMove), compareMoves);
+
+    // 최대 개수만큼 반환
+    int returnCount = (candidateCount < maxCount) ? candidateCount : maxCount;
+    for (int i = 0; i < returnCount; i++) {
+        moves[i].row = candidates[i].row;
+        moves[i].col = candidates[i].col;
+    }
+
+    return returnCount;
 }
 
-// Killer Move 업데이트
-static void updateKillerMove(int depth, int row, int col) {
-    if (depth >= MAX_DEPTH) return;
-    
-    // 이미 있으면 무시
-    if (killerMoves[depth][0].row == row && killerMoves[depth][0].col == col) return;
-    
-    // 두 번째를 첫 번째로, 새 것을 두 번째로
-    killerMoves[depth][1] = killerMoves[depth][0];
-    killerMoves[depth][0].row = row;
-    killerMoves[depth][0].col = col;
-}
-
-// History Heuristic 업데이트
-static void updateHistory(int row, int col, int depth) {
-    historyTable[row][col] += depth * depth;
-}
-
-// Principal Variation Search (PVS) - Alpha-Beta의 개선 버전
-static MoveResult pvs(int board[BOARD_SIZE][BOARD_SIZE], int depth, int alpha, int beta, 
-                      int isMaximizing, int aiColor, int nullMove) {
+// Alpha-Beta Pruning Minimax
+MoveResult minimax(int board[BOARD_SIZE][BOARD_SIZE], int depth, int alpha, int beta,
+                   int isMaximizing, int aiColor) {
     MoveResult result = {0, -1, -1};
     int opponent = (aiColor == BLACK) ? WHITE : BLACK;
-    unsigned long long hash = computeHash(board);
-    
-    // Transposition Table 조회
-    TTEntry* ttEntry = probeTT(hash);
-    Move ttMove = {-1, -1};
-    
-    if (ttEntry != NULL && ttEntry->depth >= depth) {
-        if (ttEntry->flag == 0) {  // EXACT
-            result.score = ttEntry->score;
-            result.row = ttEntry->bestRow;
-            result.col = ttEntry->bestCol;
-            return result;
-        } else if (ttEntry->flag == 1 && ttEntry->score > alpha) {  // LOWERBOUND
-            alpha = ttEntry->score;
-        } else if (ttEntry->flag == 2 && ttEntry->score < beta) {   // UPPERBOUND
-            beta = ttEntry->score;
-        }
-        
-        if (alpha >= beta) {
-            result.score = ttEntry->score;
-            result.row = ttEntry->bestRow;
-            result.col = ttEntry->bestCol;
-            return result;
-        }
-        
-        ttMove.row = ttEntry->bestRow;
-        ttMove.col = ttEntry->bestCol;
-    }
-    
-    // 깊이 0이면 평가
+    int currentColor = isMaximizing ? aiColor : opponent;
+
+    // 기저 조건: 깊이 0
     if (depth == 0) {
         result.score = evaluateBoard(board, aiColor);
         return result;
     }
-    
-    // 착수 후보 가져오기
-    ScoredMove scoredMoves[MAX_MOVES];
-    int maxMoves = (depth > 3) ? 12 : 20;  // 깊이에 따라 후보 수 조절
-    int moveCount = getSortedMoves(board, scoredMoves, 
-                                   isMaximizing ? aiColor : opponent, 
-                                   depth, maxMoves, &ttMove);
-    
+
+    // 후보 수 가져오기
+    Move moves[MAX_MOVES];
+    int moveCount = getPossibleMoves(board, moves, MAX_MOVES);
+
     if (moveCount == 0) {
         result.score = evaluateBoard(board, aiColor);
         return result;
     }
-    
-    int currentColor = isMaximizing ? aiColor : opponent;
-    int bestRow = scoredMoves[0].row;
-    int bestCol = scoredMoves[0].col;
-    int ttFlag = 2;  // UPPERBOUND
-    
+
+    // 후보 수 점수 매기기 및 정렬 (move ordering)
+    ScoredMove scoredMoves[MAX_MOVES];
     for (int i = 0; i < moveCount; i++) {
-        int row = scoredMoves[i].row;
-        int col = scoredMoves[i].col;
-        
-        board[row][col] = currentColor;
-        
-        // 승리 체크
-        if (checkWinBoard(board, row, col, currentColor)) {
+        scoredMoves[i].row = moves[i].row;
+        scoredMoves[i].col = moves[i].col;
+        // 공격/방어 점수 합산
+        int attackScore = evaluatePosition(board, moves[i].row, moves[i].col, currentColor);
+        int defenseScore = evaluatePosition(board, moves[i].row, moves[i].col,
+                                           (currentColor == BLACK) ? WHITE : BLACK);
+        scoredMoves[i].score = attackScore + defenseScore;
+    }
+    qsort(scoredMoves, moveCount, sizeof(ScoredMove), compareMoves);
+
+    // 깊이에 따라 후보 수 제한 (성능 최적화)
+    int maxMoves = moveCount;
+    if (depth <= 2) maxMoves = (moveCount < 20) ? moveCount : 20;
+    else if (depth <= 4) maxMoves = (moveCount < 15) ? moveCount : 15;
+    else maxMoves = (moveCount < 10) ? moveCount : 10;
+
+    result.row = scoredMoves[0].row;
+    result.col = scoredMoves[0].col;
+
+    if (isMaximizing) {
+        result.score = -INFINITY_SCORE;
+
+        for (int i = 0; i < maxMoves; i++) {
+            int row = scoredMoves[i].row;
+            int col = scoredMoves[i].col;
+
+            board[row][col] = aiColor;
+
+            // 승리 체크
+            if (checkWinBoard(board, row, col, aiColor)) {
+                board[row][col] = EMPTY;
+                result.score = INFINITY_SCORE - (10 - depth);  // 빠른 승리 우선
+                result.row = row;
+                result.col = col;
+                return result;
+            }
+
+            MoveResult child = minimax(board, depth - 1, alpha, beta, 0, aiColor);
             board[row][col] = EMPTY;
-            result.score = isMaximizing ? INFINITY_SCORE : -INFINITY_SCORE;
-            result.row = row;
-            result.col = col;
-            
-            storeTT(hash, depth, result.score, 0, row, col);
-            return result;
-        }
-        
-        MoveResult childResult;
-        
-        // PVS: 첫 번째는 full window, 나머지는 null window
-        if (i == 0) {
-            childResult = pvs(board, depth - 1, alpha, beta, !isMaximizing, aiColor, 0);
-        } else {
-            // Null Window Search
-            if (isMaximizing) {
-                childResult = pvs(board, depth - 1, alpha, alpha + 1, 0, aiColor, 0);
-                if (childResult.score > alpha && childResult.score < beta) {
-                    // Re-search with full window
-                    childResult = pvs(board, depth - 1, alpha, beta, 0, aiColor, 0);
-                }
-            } else {
-                childResult = pvs(board, depth - 1, beta - 1, beta, 1, aiColor, 0);
-                if (childResult.score < beta && childResult.score > alpha) {
-                    childResult = pvs(board, depth - 1, alpha, beta, 1, aiColor, 0);
-                }
+
+            if (child.score > result.score) {
+                result.score = child.score;
+                result.row = row;
+                result.col = col;
+            }
+
+            if (result.score > alpha) {
+                alpha = result.score;
+            }
+
+            if (beta <= alpha) {
+                break;  // Pruning
             }
         }
-        
-        board[row][col] = EMPTY;
-        
-        if (isMaximizing) {
-            if (childResult.score > alpha) {
-                alpha = childResult.score;
-                bestRow = row;
-                bestCol = col;
-                ttFlag = 0;  // EXACT
+    } else {
+        result.score = INFINITY_SCORE;
+
+        for (int i = 0; i < maxMoves; i++) {
+            int row = scoredMoves[i].row;
+            int col = scoredMoves[i].col;
+
+            board[row][col] = opponent;
+
+            // 상대 승리 체크
+            if (checkWinBoard(board, row, col, opponent)) {
+                board[row][col] = EMPTY;
+                result.score = -INFINITY_SCORE + (10 - depth);
+                result.row = row;
+                result.col = col;
+                return result;
             }
-        } else {
-            if (childResult.score < beta) {
-                beta = childResult.score;
-                bestRow = row;
-                bestCol = col;
-                ttFlag = 0;  // EXACT
+
+            MoveResult child = minimax(board, depth - 1, alpha, beta, 1, aiColor);
+            board[row][col] = EMPTY;
+
+            if (child.score < result.score) {
+                result.score = child.score;
+                result.row = row;
+                result.col = col;
             }
-        }
-        
-        // Pruning
-        if (alpha >= beta) {
-            updateKillerMove(depth, row, col);
-            updateHistory(row, col, depth);
-            ttFlag = isMaximizing ? 1 : 2;  // LOWERBOUND or UPPERBOUND
-            break;
+
+            if (result.score < beta) {
+                beta = result.score;
+            }
+
+            if (beta <= alpha) {
+                break;  // Pruning
+            }
         }
     }
-    
-    result.score = isMaximizing ? alpha : beta;
-    result.row = bestRow;
-    result.col = bestCol;
-    
-    // Transposition Table 저장
-    storeTT(hash, depth, result.score, ttFlag, bestRow, bestCol);
-    
+
     return result;
 }
 
-// 기존 minimax 함수 (호환성 유지)
-MoveResult minimax(int board[BOARD_SIZE][BOARD_SIZE], int depth, int alpha, int beta, 
-                   int isMaximizing, int aiColor) {
-    return pvs(board, depth, alpha, beta, isMaximizing, aiColor, 0);
-}
-
-// Iterative Deepening
-static Move iterativeDeepening(int board[BOARD_SIZE][BOARD_SIZE], int aiColor, int maxDepth, int timeLimit) {
-    Move bestMove = {BOARD_SIZE / 2, BOARD_SIZE / 2};
-    clock_t startTime = clock();
-    
-    for (int depth = 2; depth <= maxDepth; depth += 2) {
-        MoveResult result = pvs(board, depth, -INFINITY_SCORE, INFINITY_SCORE, 1, aiColor, 0);
-        
-        if (result.row >= 0 && result.col >= 0) {
-            bestMove.row = result.row;
-            bestMove.col = result.col;
-        }
-        
-        // 승리 확정이면 조기 종료
-        if (result.score >= PATTERN_FIVE) break;
-        
-        // 시간 체크
-        clock_t currentTime = clock();
-        double elapsed = (double)(currentTime - startTime) / CLOCKS_PER_SEC * 1000;
-        if (elapsed > timeLimit * 0.7) break;  // 70% 시간 사용하면 종료
-    }
-    
-    return bestMove;
-}
-
-// AI의 최적 착수 찾기 (개선 버전)
+// AI 최적 착수 찾기
 Move findBestMove(int board[BOARD_SIZE][BOARD_SIZE], int aiColor, int difficulty) {
-    // 초기화 확인
-    if (transpositionTable == NULL) {
+    if (!initialized) {
         initAI();
     }
-    
-    // 난이도별 설정
-    // Easy: 깊이 2, 실수 30%
-    // Medium: 깊이 6, VCF 탐지
-    // Hard: 깊이 10, 전체 기능, 시간 관리
-    
-    int depthMap[] = {2, 6, 10};
-    int timeLimitMap[] = {500, 2000, 5000};  // ms
-    int depth = depthMap[difficulty];
-    int timeLimit = timeLimitMap[difficulty];
-    
+
     int opponent = (aiColor == BLACK) ? WHITE : BLACK;
-    
+
     // 후보 수 가져오기
-    Move possibleMoves[MAX_MOVES];
-    int moveCount = getPossibleMoves(board, possibleMoves, 50);
-    Move bestMove = {-1, -1};
-    
+    Move moves[MAX_MOVES];
+    int moveCount = getPossibleMoves(board, moves, MAX_MOVES);
+
     if (moveCount == 0) {
-        bestMove.row = BOARD_SIZE / 2;
-        bestMove.col = BOARD_SIZE / 2;
-        return bestMove;
+        Move center = {BOARD_SIZE / 2, BOARD_SIZE / 2};
+        return center;
     }
-    
-    // Easy: 30% 확률로 랜덤
-    if (difficulty == EASY && (rand() % 100) < 30) {
-        int randomIndex = rand() % ((moveCount < 5) ? moveCount : 5);
-        return possibleMoves[randomIndex];
-    }
-    
-    // 즉시 승리/방어 체크
-    int bestAttackScore = 0, bestDefenseScore = 0;
-    int bestAttackIdx = -1, bestDefenseIdx = -1;
-    int urgentDefenseIdx = -1;
-    
+
+    // === 1단계: 즉시 승리 확인 ===
     for (int i = 0; i < moveCount; i++) {
-        int row = possibleMoves[i].row;
-        int col = possibleMoves[i].col;
-        
-        int attackScore = evaluatePositionAdvanced(board, row, col, aiColor);
-        int defenseScore = evaluatePositionAdvanced(board, row, col, opponent);
-        
-        // 즉시 승리
-        if (attackScore >= PATTERN_FIVE) {
-            return possibleMoves[i];
+        int score = evaluatePosition(board, moves[i].row, moves[i].col, aiColor);
+        if (score >= SCORE_FIVE) {
+            return moves[i];
         }
-        
-        // 상대 5목 방어 필수
-        if (defenseScore >= PATTERN_FIVE && urgentDefenseIdx == -1) {
-            urgentDefenseIdx = i;
+    }
+
+    // === 2단계: 상대 즉시 승리 방어 ===
+    for (int i = 0; i < moveCount; i++) {
+        int score = evaluatePosition(board, moves[i].row, moves[i].col, opponent);
+        if (score >= SCORE_FIVE) {
+            return moves[i];
         }
-        
-        if (attackScore > bestAttackScore) {
-            bestAttackScore = attackScore;
-            bestAttackIdx = i;
+    }
+
+    // === 3단계: 승리 확정 수 (열린4, 쌍사) ===
+    for (int i = 0; i < moveCount; i++) {
+        int score = evaluatePosition(board, moves[i].row, moves[i].col, aiColor);
+        if (score >= SCORE_OPEN_FOUR) {
+            return moves[i];
         }
-        if (defenseScore > bestDefenseScore && defenseScore < PATTERN_FIVE) {
-            bestDefenseScore = defenseScore;
+    }
+
+    // === 4단계: 상대 승리 확정 방어 ===
+    int bestDefenseIdx = -1;
+    int bestDefenseScore = 0;
+    for (int i = 0; i < moveCount; i++) {
+        int score = evaluatePosition(board, moves[i].row, moves[i].col, opponent);
+        if (score >= SCORE_OPEN_FOUR) {
+            // 열린4 방어 필수
+            return moves[i];
+        }
+        if (score > bestDefenseScore) {
+            bestDefenseScore = score;
             bestDefenseIdx = i;
         }
     }
-    
-    // 긴급 방어
-    if (urgentDefenseIdx >= 0) {
-        return possibleMoves[urgentDefenseIdx];
-    }
-    
-    // 승리 확정 수 (열린4, 쌍사, 사삼)
-    if (bestAttackScore >= PATTERN_OPEN_FOUR && bestAttackIdx >= 0) {
-        return possibleMoves[bestAttackIdx];
-    }
-    
-    // 상대 승리 확정 막기
-    if (bestDefenseScore >= PATTERN_OPEN_FOUR && bestDefenseIdx >= 0) {
-        return possibleMoves[bestDefenseIdx];
-    }
-    
-    // Hard 난이도: VCF 탐지
-    if (difficulty >= HARD) {
-        // 내 VCF 확인
+
+    // === 5단계: 닫힌4 방어 ===
+    if (bestDefenseScore >= SCORE_FOUR) {
+        // 방어하면서 공격도 가능한지 확인
+        int defRow = moves[bestDefenseIdx].row;
+        int defCol = moves[bestDefenseIdx].col;
+        int defAttackScore = evaluatePosition(board, defRow, defCol, aiColor);
+
+        // 더 좋은 공격 수가 있는지 확인
         for (int i = 0; i < moveCount; i++) {
-            int row = possibleMoves[i].row;
-            int col = possibleMoves[i].col;
-            
-            board[row][col] = aiColor;
-            if (quickVCFCheck(board, aiColor)) {
-                board[row][col] = EMPTY;
-                return possibleMoves[i];
+            int attackScore = evaluatePosition(board, moves[i].row, moves[i].col, aiColor);
+            if (attackScore >= SCORE_OPEN_FOUR) {
+                // 공격이 더 좋으면 공격 우선 (상대가 막아야 함)
+                return moves[i];
             }
-            board[row][col] = EMPTY;
+        }
+
+        return moves[bestDefenseIdx];
+    }
+
+    // === 6단계: 공격 우선 (열린3 이상) ===
+    int bestAttackIdx = -1;
+    int bestAttackScore = 0;
+    for (int i = 0; i < moveCount; i++) {
+        int score = evaluatePosition(board, moves[i].row, moves[i].col, aiColor);
+        if (score > bestAttackScore) {
+            bestAttackScore = score;
+            bestAttackIdx = i;
         }
     }
-    
-    // 닫힌4 방어
-    if (bestDefenseScore >= PATTERN_CLOSED_FOUR && bestDefenseIdx >= 0) {
-        return possibleMoves[bestDefenseIdx];
+
+    // 열린3 이상이면 공격
+    if (bestAttackScore >= SCORE_OPEN_THREE && bestAttackIdx >= 0) {
+        // 단, 상대 열린3 방어가 더 급하면 방어
+        if (bestDefenseScore >= SCORE_OPEN_THREE && bestDefenseScore > bestAttackScore) {
+            return moves[bestDefenseIdx];
+        }
+        return moves[bestAttackIdx];
     }
-    
-    // 쌍삼 공격
-    if (bestAttackScore >= PATTERN_DOUBLE_THREE && bestAttackIdx >= 0) {
-        return possibleMoves[bestAttackIdx];
+
+    // 상대 열린3 방어
+    if (bestDefenseScore >= SCORE_OPEN_THREE && bestDefenseIdx >= 0) {
+        return moves[bestDefenseIdx];
     }
-    
-    // 열린3 방어
-    if (bestDefenseScore >= PATTERN_OPEN_THREE && bestDefenseIdx >= 0) {
-        return possibleMoves[bestDefenseIdx];
+
+    // === 7단계: Minimax 탐색 ===
+    // 난이도별 깊이 설정
+    int depth;
+    switch (difficulty) {
+        case EASY:
+            depth = 2;
+            // 30% 확률로 랜덤 선택
+            if (rand() % 100 < 30) {
+                int randIdx = rand() % ((moveCount < 5) ? moveCount : 5);
+                return moves[randIdx];
+            }
+            break;
+        case MEDIUM:
+            depth = 4;
+            break;
+        case HARD:
+        default:
+            depth = 6;
+            break;
     }
-    
-    // Iterative Deepening으로 최선의 수 탐색
-    bestMove = iterativeDeepening(board, aiColor, depth, timeLimit);
-    
-    // 유효한 수가 없으면 첫 번째 후보 반환
-    if (bestMove.row < 0 || bestMove.col < 0) {
-        return possibleMoves[0];
+
+    MoveResult result = minimax(board, depth, -INFINITY_SCORE, INFINITY_SCORE, 1, aiColor);
+
+    if (result.row >= 0 && result.col >= 0) {
+        Move bestMove = {result.row, result.col};
+        return bestMove;
     }
-    
-    return bestMove;
+
+    // 예외 처리: 첫 번째 후보 반환
+    return moves[0];
 }
