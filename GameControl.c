@@ -1217,8 +1217,6 @@ void showMenu() {
 void gameLoop() {
     clearScreen();
     hideCursor(1);
-    printBoard();
-    int key;
 
     while (1) {
         if (gameMode == 1 && currentPlayer == WHITE) { // AI 차례
@@ -1238,7 +1236,72 @@ void gameLoop() {
             continue;
         }
 
-        key = _getch();
+         int key = -1;
+if (gameMode == 2) {
+
+     DWORD start = GetTickCount();
+     int timed_out = 0;
+     int firstRender = 0;
+
+     while (1) {
+
+         int elapsed = GetTickCount() - start;
+         int remain = 10 - (elapsed / 1000);
+         if (remain < 0) remain = 0;
+
+         if (!firstRender) {
+             printBoard(-1);
+             firstRender = 1;
+         }
+
+         printRemainTime(remain);
+
+         if (_kbhit()) {
+             int key = _getch();
+
+             // 돌 놓기 시만 타이머 재설정
+             if (key == 'b' || key == 'B') {
+                 if (placeStone(cursorX, cursorY)) {
+                     // 돌 놓으면 다음 턴으로
+                     currentPlayer = (currentPlayer == BLACK) ? WHITE : BLACK;
+                     break;  // 루프 탈출 후 다시 턴 시작
+                 }
+             }
+             // 커서 이동은 타이머 계속 카운트 다운
+             else if (key == 'w' || key == 'a' || key == 's' || key == 'd' ||
+                 key == 'W' || key == 'A' || key == 'S' || key == 'D') {
+                 moveCursor(key);
+                 printBoard(-1); // 커서 이동 반영
+             }
+             // 메뉴 호출
+             else if (key == 'm' || key == 'M') {
+                 showMenu();
+                 firstRender = 0;
+             }
+         }
+
+         if (elapsed >= 10000) {
+             timed_out = 1;
+             break;
+         }
+
+         Sleep(50);
+     }
+
+     if (timed_out) {
+         printBoard(-1);
+         printTemporaryMessage("시간 초과! 턴이 넘어갑니다.", 3);
+         currentPlayer = (currentPlayer == BLACK) ? WHITE : BLACK;
+         Sleep(500);
+     }
+ }
+
+ else {
+     // 1인용은 기존 방식 유지
+     printBoard(-1);
+     key = _getch();
+ }
+
         if (key == 'w' || key == 'a' || key == 's' || key == 'd' || key == 'W' || key == 'A' || key == 'S' || key == 'D') {
             moveCursor(key);
         }
@@ -1268,6 +1331,7 @@ void gameLoop() {
 
         printBoard();
     }
+    hideCursor(0);
 }
 
 int main() {
