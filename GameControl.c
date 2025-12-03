@@ -192,6 +192,23 @@ int main() {
     scanf("%d", &gameMode);
 
     if(gameMode == 1){
+        // 난이도 선택
+        int diffChoice;
+        printf("\n======= 난이도 선택 =======\n");
+        printf("1. 쉬움 (Easy)\n");
+        printf("2. 보통 (Medium)\n");
+        printf("3. 어려움 (Hard)\n");
+        printf("===========================\n");
+        printf("난이도를 선택하세요 (1~3): ");
+        scanf("%d", &diffChoice);
+
+        switch(diffChoice) {
+            case 1: difficulty = EASY; break;
+            case 2: difficulty = MEDIUM; break;
+            case 3: difficulty = HARD; break;
+            default: difficulty = MEDIUM; break;
+        }
+
         gameLoop();
     }
     else if(gameMode == 2){
