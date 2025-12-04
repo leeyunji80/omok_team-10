@@ -1322,7 +1322,9 @@ if (gameMode == 2) {
         }
 
         printBoard(-1);
+        if (gameMode == 2) {   // ★ 2인용일 때만 타이머 출력
         printRemainTime(10 - (GetTickCount() - playerTurnStart) / 1000);
+}
     }
     hideCursor(0);
 }
