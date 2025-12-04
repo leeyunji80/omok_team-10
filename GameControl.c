@@ -689,7 +689,7 @@ void printTemporaryMessage(const char* msg, int seconds) {
 }
 
 void printRemainTime(int remain) {
-    COORD pos = { TIME_POS_X, TIME_POS_Y };
+    COORD pos = { 0, 0};
     SetConsoleCursorPosition(GetStdHandle(STD_OUTPUT_HANDLE), pos);
     printf("남은 시간 : %2d초  ", remain); // 숫자만 바뀌게 공백 포함
     fflush(stdout);
@@ -1197,9 +1197,10 @@ void showMenu() {
     scanf("%d", &choice);
 
     switch (choice) {
-    case 1: SaveCurrentGame(); printf("아무키나 누르면 게임으로 돌아갑니다..."); _getch(); return ;
+    case 1: SaveCurrentGame(); printf("아무키나 누르면 게임으로 돌아갑니다..."); _getch(); hideCursor(1); return ;
     case 2:   if (LoadSelectedGame()) {
         clearScreen();
+        hideCursor(1);
                 return ;
                 
             } else {
@@ -1322,7 +1323,7 @@ if (gameMode == 2) {
         }
 
         printBoard(-1);
-        if (gameMode == 2) {   // ★ 2인용일 때만 타이머 출력
+        if (gameMode == 2) {
         printRemainTime(10 - (GetTickCount() - playerTurnStart) / 1000);
 }
     }
