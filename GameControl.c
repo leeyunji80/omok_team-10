@@ -45,8 +45,6 @@
 #define BOARD_SIZE SIZE
 #define MAX_MOVES 60
 #define INFINITY_SCORE 10000000
-#define TIME_POS_X 0
-#define TIME_POS_Y 20
 
 /*==========전역 변수 상태=============*/
 int board[SIZE][SIZE];
@@ -699,7 +697,7 @@ void printRemainTime(int remain) {
 
 // 보드 출력
 void printBoard(int remainTime) {
-    gotoxy(0, 0);
+    gotoxy(0, 1);
     printf("                                        메뉴 M키\n\n");
 
     printf("   ");
@@ -813,6 +811,7 @@ void printRemainTime(int remain) {
     COORD pos = { 0, 0 }; // 좌측 상단
     SetConsoleCursorPosition(GetStdHandle(STD_OUTPUT_HANDLE), pos);
     printf("남은 시간: %2d초  ", remain); // 남은 자리 공백으로 덮어쓰기
+    fflush(stdout);
 }
 
 /*===============랭킹 관련 함수===============*/
@@ -1224,6 +1223,8 @@ void showMenu() {
 void gameLoop() {
     clearScreen();
     hideCursor(1);
+    DWORD playerTurnStart = GetTickCount();
+    int turnActive = 0;
 
     while (1) {
         if (gameMode == 1 && currentPlayer == WHITE) { // AI 차례
@@ -1246,15 +1247,19 @@ void gameLoop() {
          int key = -1;
 if (gameMode == 2) {
 
+    if (!turnActive) {
+	playerTurnStart = GetTickCount();
+    turnActive = 1;
+}
      DWORD start = GetTickCount();
      int timed_out = 0;
-     int firstRender = 0;
+     printBoard(-1);
 
          while (1) {
 
         // 경과 시간 계산
-        int elapsed = GetTickCount() - start;
-        int remain = 10 - (elapsed / 1000);
+         DWORD now = GetTickCount();
+        int remain = 10 - (now - playerTurnStart) / 1000;
         if (remain < 0) remain = 0;
 
         printRemainTime(remain);
@@ -1263,7 +1268,7 @@ if (gameMode == 2) {
             key = _getch();
             break;
         }
-        if (elapsed >= 10000) {
+        if (remain == 0) {
             timed_out = 1;
             break;
         }
@@ -1273,8 +1278,9 @@ if (gameMode == 2) {
 
     if (timed_out) {
         printBoard(0);
-       printTemporaryMessage("시간 초과! 턴이 넘어갑니다.", 1); // 3초 표시 후 지움
+       printTemporaryMessage("시간 초과! 턴이 넘어갑니다.", 1); // 1초 표시 후 지움
         currentPlayer = (currentPlayer == BLACK) ? WHITE : BLACK;
+        turnActive = 0;
         Sleep(500);
         continue;
     }
@@ -1291,6 +1297,8 @@ if (gameMode == 2) {
         }
         else if (key == 'b' || key == 'B') {
             if (placeStone(cursorX, cursorY)) {
+                printBoard(-1);
+                turnActive = 0;
                 printBoard(-1);
                 int winner = checkWinGameplay(lastMoveX, lastMoveY);
                 if (winner != 0) {
@@ -1314,6 +1322,7 @@ if (gameMode == 2) {
         }
 
         printBoard(-1);
+        printRemainTime(10 - (GetTickCount() - playerTurnStart) / 1000);
     }
     hideCursor(0);
 }
