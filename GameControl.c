@@ -45,6 +45,8 @@
 #define BOARD_SIZE SIZE
 #define MAX_MOVES 60
 #define INFINITY_SCORE 10000000
+#define TIME_POS_X 0
+#define TIME_POS_Y 20
 
 /*==========전역 변수 상태=============*/
 int board[SIZE][SIZE];
@@ -688,6 +690,13 @@ void printTemporaryMessage(const char* msg, int seconds) {
     fflush(stdout);
 }
 
+void printRemainTime(int remain) {
+    COORD pos = { TIME_POS_X, TIME_POS_Y };
+    SetConsoleCursorPosition(GetStdHandle(STD_OUTPUT_HANDLE), pos);
+    printf("남은 시간 : %2d초  ", remain); // 숫자만 바뀌게 공백 포함
+    fflush(stdout);
+}
+
 // 보드 출력
 void printBoard(int remainTime) {
     gotoxy(0, 0);
@@ -1248,12 +1257,6 @@ if (gameMode == 2) {
         int remain = 10 - (elapsed / 1000);
         if (remain < 0) remain = 0;
 
-        if (!firstRender) {
-            printBoard(-1);
-            firstRender = 1;
-        }
-
-        // 남은 시간 텍스트만 갱신
         printRemainTime(remain);
 
         if (_kbhit()) {
@@ -1270,7 +1273,7 @@ if (gameMode == 2) {
 
     if (timed_out) {
         printBoard(0);
-       printTemporaryMessage("시간 초과! 턴이 넘어갑니다.", 3); // 3초 표시 후 지움
+       printTemporaryMessage("시간 초과! 턴이 넘어갑니다.", 1); // 3초 표시 후 지움
         currentPlayer = (currentPlayer == BLACK) ? WHITE : BLACK;
         Sleep(500);
         continue;
