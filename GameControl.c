@@ -985,14 +985,14 @@ void print_rankings_filtered(int filter_mode, int filter_difficulty) {
         fclose(fp);
     }
 
-    // 제목 설정
+    // 제목 설정 (EASY=0, MEDIUM=1, HARD=2)
     const char* modeStr = (filter_mode == 1) ? "1인용 (AI 대전)" : "2인용 (플레이어 대전)";
     const char* diffStr = "";
     if (filter_mode == 1) {
         switch (filter_difficulty) {
-            case 1: diffStr = " - 쉬움"; break;
-            case 2: diffStr = " - 보통"; break;
-            case 3: diffStr = " - 어려움"; break;
+            case 0: diffStr = " - 쉬움"; break;
+            case 1: diffStr = " - 보통"; break;
+            case 2: diffStr = " - 어려움"; break;
         }
     }
 
@@ -1172,26 +1172,27 @@ void print_rankings() {
                 else if (diffChoice >= 1 && diffChoice <= 3) {
                     printf("\033[2J\033[H");
                     fflush(stdout);
-                    print_rankings_filtered(1, diffChoice);
+                    // 메뉴 선택 1,2,3 -> 실제 난이도 값 0,1,2 (EASY, MEDIUM, HARD)
+                    print_rankings_filtered(1, diffChoice - 1);
                 }
                 else if (diffChoice == 4) {
-                    // 전체 보기: 각 난이도별로 출력
+                    // 전체 보기: 각 난이도별로 출력 (EASY=0, MEDIUM=1, HARD=2)
                     printf("\033[2J\033[H");
                     fflush(stdout);
                     printf("\n========== 1인용 전체 랭킹 ==========\n\n");
 
                     printf("[ 쉬움 (Easy) ]\n");
-                    print_rankings_filtered(1, 1);
+                    print_rankings_filtered(1, 0);
 
                     printf("\033[2J\033[H");
                     fflush(stdout);
                     printf("[ 보통 (Medium) ]\n");
-                    print_rankings_filtered(1, 2);
+                    print_rankings_filtered(1, 1);
 
                     printf("\033[2J\033[H");
                     fflush(stdout);
                     printf("[ 어려움 (Hard) ]\n");
-                    print_rankings_filtered(1, 3);
+                    print_rankings_filtered(1, 2);
                 }
             }
         }
