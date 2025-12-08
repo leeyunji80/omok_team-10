@@ -1117,16 +1117,8 @@ int writeSaveList(cJSON* root) {
     return 1;
 }
 
-// 게임 저장 (JSON 기반)
-void SaveGame(const SaveData* data) {
-    cJSON* saveList = loadSaveList();
-
-    // 최대 슬롯 초과 시 가장 오래된 것 삭제
-    while (cJSON_GetArraySize(saveList) >= MAX_SAVE_SLOTS) {
-        cJSON_DeleteItemFromArray(saveList, 0);
-    }
-
-    // 새 저장 데이터 생성
+// 저장 데이터 엔트리 생성 헬퍼 함수
+cJSON* createSaveEntry(const SaveData* data) {
     cJSON* saveEntry = cJSON_CreateObject();
 
     // 저장 시간 생성
@@ -1153,12 +1145,93 @@ void SaveGame(const SaveData* data) {
     }
     cJSON_AddItemToObject(saveEntry, "board", boardArray);
 
-    // 배열에 추가
-    cJSON_AddItemToArray(saveList, saveEntry);
+    return saveEntry;
+}
+
+// 게임 저장 (JSON 기반) - 슬롯 선택 및 덮어쓰기 지원
+void SaveGame(const SaveData* data) {
+    clearScreen();
+    cJSON* saveList = loadSaveList();
+    int count = cJSON_GetArraySize(saveList);
+
+    printf("\n=======저장 슬롯 선택=======\n");
+    printf("%-4s %-20s %-10s %-10s\n", "번호", "저장 시간", "모드", "차례");
+    printf("--------------------------------------------------\n");
+
+    // 기존 저장 슬롯 표시
+    for (int i = 0; i < MAX_SAVE_SLOTS; i++) {
+        if (i < count) {
+            cJSON* entry = cJSON_GetArrayItem(saveList, i);
+            cJSON* timestamp = cJSON_GetObjectItem(entry, "timestamp");
+            cJSON* mode = cJSON_GetObjectItem(entry, "gameMode");
+            cJSON* turn = cJSON_GetObjectItem(entry, "currentTurn");
+
+            const char* modeStr = "알수없음";
+            if (mode && mode->valueint == 1) modeStr = "1인용";
+            else if (mode && mode->valueint == 2) modeStr = "2인용";
+
+            const char* turnStr = (turn && turn->valueint == BLACK) ? "흑" : "백";
+
+            printf("%-4d %-20s %-10s %-10s\n",
+                i + 1,
+                timestamp ? timestamp->valuestring : "알수없음",
+                modeStr,
+                turnStr);
+        } else {
+            printf("%-4d %-20s %-10s %-10s\n", i + 1, "(빈 슬롯)", "-", "-");
+        }
+    }
+    printf("--------------------------------------------------\n");
+    printf("저장할 슬롯 번호를 입력하세요 (1~%d, 0: 취소): ", MAX_SAVE_SLOTS);
+
+    int choice;
+    scanf("%d", &choice);
+
+    if (choice < 1 || choice > MAX_SAVE_SLOTS) {
+        printf("저장이 취소되었습니다.\n");
+        cJSON_Delete(saveList);
+        return;
+    }
+
+    int slotIndex = choice - 1;
+
+    // 덮어쓰기 확인
+    if (slotIndex < count) {
+        printf("슬롯 %d에 이미 저장된 게임이 있습니다. 덮어쓰시겠습니까? (Y/N): ", choice);
+        char confirm = _getch();
+        printf("%c\n", confirm);
+        if (confirm != 'Y' && confirm != 'y') {
+            printf("저장이 취소되었습니다.\n");
+            cJSON_Delete(saveList);
+            return;
+        }
+    }
+
+    // 새 저장 데이터 생성
+    cJSON* saveEntry = createSaveEntry(data);
+
+    // 슬롯에 저장 (덮어쓰기 또는 새로 추가)
+    if (slotIndex < count) {
+        // 기존 슬롯 덮어쓰기
+        cJSON_ReplaceItemInArray(saveList, slotIndex, saveEntry);
+    } else {
+        // 빈 슬롯이 중간에 있을 경우 빈 엔트리로 채우기
+        while (cJSON_GetArraySize(saveList) < slotIndex) {
+            cJSON* emptyEntry = cJSON_CreateObject();
+            cJSON_AddStringToObject(emptyEntry, "timestamp", "");
+            cJSON_AddNumberToObject(emptyEntry, "gameMode", 0);
+            cJSON_AddNumberToObject(emptyEntry, "currentTurn", 0);
+            cJSON_AddNumberToObject(emptyEntry, "aiDifficulty", 0);
+            cJSON_AddItemToObject(emptyEntry, "board", cJSON_CreateArray());
+            cJSON_AddItemToArray(saveList, emptyEntry);
+        }
+        cJSON_AddItemToArray(saveList, saveEntry);
+    }
 
     // 파일에 저장
     if (writeSaveList(saveList)) {
-        printf("\n게임이 저장되었습니다! (%s)\n", timestamp);
+        cJSON* ts = cJSON_GetObjectItem(saveEntry, "timestamp");
+        printf("\n슬롯 %d에 게임이 저장되었습니다! (%s)\n", choice, ts ? ts->valuestring : "");
     } else {
         printf("\n저장 실패!\n");
     }
@@ -1168,10 +1241,27 @@ void SaveGame(const SaveData* data) {
 
 // 게임 불러오기 (JSON 기반)
 int LoadGame(SaveData* data) {
+    clearScreen();
     cJSON* saveList = loadSaveList();
     int count = cJSON_GetArraySize(saveList);
 
     if (count == 0) {
+        printf("\n저장된 게임이 없습니다.\n");
+        cJSON_Delete(saveList);
+        return 0;
+    }
+
+    // 유효한 저장 슬롯 수 확인
+    int validCount = 0;
+    for (int i = 0; i < count; i++) {
+        cJSON* entry = cJSON_GetArrayItem(saveList, i);
+        cJSON* timestamp = cJSON_GetObjectItem(entry, "timestamp");
+        if (timestamp && strlen(timestamp->valuestring) > 0) {
+            validCount++;
+        }
+    }
+
+    if (validCount == 0) {
         printf("\n저장된 게임이 없습니다.\n");
         cJSON_Delete(saveList);
         return 0;
@@ -1187,6 +1277,12 @@ int LoadGame(SaveData* data) {
         cJSON* mode = cJSON_GetObjectItem(entry, "gameMode");
         cJSON* turn = cJSON_GetObjectItem(entry, "currentTurn");
 
+        // 빈 슬롯 건너뛰기
+        if (!timestamp || strlen(timestamp->valuestring) == 0) {
+            printf("%-4d %-20s %-10s %-10s\n", i + 1, "(빈 슬롯)", "-", "-");
+            continue;
+        }
+
         const char* modeStr = "알수없음";
         if (mode && mode->valueint == 1) modeStr = "1인용";
         else if (mode && mode->valueint == 2) modeStr = "2인용";
@@ -1195,7 +1291,7 @@ int LoadGame(SaveData* data) {
 
         printf("%-4d %-20s %-10s %-10s\n",
             i + 1,
-            timestamp ? timestamp->valuestring : "알수없음",
+            timestamp->valuestring,
             modeStr,
             turnStr);
     }
@@ -1212,6 +1308,14 @@ int LoadGame(SaveData* data) {
 
     // 선택한 저장 데이터 로드
     cJSON* entry = cJSON_GetArrayItem(saveList, choice - 1);
+    cJSON* timestamp = cJSON_GetObjectItem(entry, "timestamp");
+
+    // 빈 슬롯 선택 시
+    if (!timestamp || strlen(timestamp->valuestring) == 0) {
+        printf("빈 슬롯입니다. 다시 선택해주세요.\n");
+        cJSON_Delete(saveList);
+        return 0;
+    }
 
     cJSON* mode = cJSON_GetObjectItem(entry, "gameMode");
     cJSON* turn = cJSON_GetObjectItem(entry, "currentTurn");
