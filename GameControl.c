@@ -89,6 +89,8 @@ int gameMode = 0; // 1=1인용, 2=2인용
 int difficulty = MEDIUM; // AI 난이도 (기본: 중간)
 int lastMoveX = -1, lastMoveY = -1;
 char player_nickname[50] = "Player";
+char player1_nickname[50] = "Player1";  // 2인용 흑돌 플레이어
+char player2_nickname[50] = "Player2";  // 2인용 백돌 플레이어
 DWORD lastTick = 0;
 int gameEndedByVictory = 0;
 
@@ -1701,16 +1703,18 @@ if (gameMode == 2) {
                         }
                     }
                     else if(gameMode == 2){
-                        // 2인용: 승자에게 닉네임 입력 받기
-                        char winner_nickname[50];
-                        char loser_nickname[50];
-                        fflush(stdin);
-                        printf("\n%s 플레이어 닉네임을 입력하세요: ", (winner == BLACK) ? "흑(승자)" : "백(승자)");
-                        scanf("%s", winner_nickname);
-                        printf("%s 플레이어 닉네임을 입력하세요: ", (winner == BLACK) ? "백(패자)" : "흑(패자)");
-                        scanf("%s", loser_nickname);
-                        update_game_result(winner_nickname, 1, 2, 0);
-                        update_game_result(loser_nickname, 0, 2, 0);
+                        // 2인용: 게임 시작 시 입력받은 닉네임 사용
+                        if (winner == BLACK) {
+                            // 흑돌(player1) 승리
+                            printf("\n%s님 승리! %s님 패배!\n", player1_nickname, player2_nickname);
+                            update_game_result(player1_nickname, 1, 2, 0);
+                            update_game_result(player2_nickname, 0, 2, 0);
+                        } else {
+                            // 백돌(player2) 승리
+                            printf("\n%s님 승리! %s님 패배!\n", player2_nickname, player1_nickname);
+                            update_game_result(player2_nickname, 1, 2, 0);
+                            update_game_result(player1_nickname, 0, 2, 0);
+                        }
                     }
                     break;
                 }
@@ -1796,6 +1800,21 @@ int main() {
                 break;
 
             case 2:  // 2인용 게임
+                clearScreen();
+                printf("\n======= 2인용 게임 - 플레이어 등록 =======\n");
+                printf("흑돌(선공) 플레이어 닉네임: ");
+                fflush(stdout);
+                scanf("%s", player1_nickname);
+                printf("백돌(후공) 플레이어 닉네임: ");
+                fflush(stdout);
+                scanf("%s", player2_nickname);
+                printf("\n게임을 시작합니다! (%s vs %s)\n", player1_nickname, player2_nickname);
+                printf("아무 키나 누르면 게임이 시작됩니다...");
+                fflush(stdout);
+                // 입력 버퍼 비우기
+                while ((c = getchar()) != '\n' && c != EOF);
+                _getch();
+
                 initBoard();
                 currentPlayer = BLACK;
                 gameEndedByVictory = 0;
