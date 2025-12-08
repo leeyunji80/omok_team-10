@@ -1455,13 +1455,58 @@ int main() {
         gameLoop();
     }
     else if(gameMode == 3){
-         if (LoadSelectedGame()) {
-            printf("게임을 불러왔습니다. 아무 키나 누르면 게임을 시작합니다...");
-            _getch();
-            gameLoop();
-        } else {
-            printf("불러오기 실패. 아무 키나 누르면 메뉴로 돌아갑니다...");
-            _getch();
+        while (1) {
+            if (LoadSelectedGame()) {
+                printf("아무 키나 누르면 게임을 시작합니다...");
+                _getch();
+                gameLoop();
+                break;
+            } else {
+                printf("\n아무 키나 누르면 메뉴로 돌아갑니다...");
+                _getch();
+                clearScreen();
+                printf("\n=========시작화면=======\n");
+                printf("1. 1인용 게임 \n");
+                printf("2. 2인용 게임 \n");
+                printf("3. 게임 불러오기 \n");
+                printf("4. 랭킹 확인하기(1인용) \n");
+                printf("5. 종료\n");
+                printf("============================\n");
+                printf("메뉴 번호를 입력하세요. (1~5): ");
+                scanf("%d", &gameMode);
+
+                if (gameMode == 1) {
+                    clearScreen();
+                    int diffChoice;
+                    printf("\n======= 난이도 선택 =======\n");
+                    printf("1. 쉬움 (Easy)\n");
+                    printf("2. 보통 (Medium)\n");
+                    printf("3. 어려움 (Hard)\n");
+                    printf("===========================\n");
+                    printf("난이도를 선택하세요 (1~3): ");
+                    scanf("%d", &diffChoice);
+                    switch(diffChoice) {
+                        case 1: difficulty = EASY; break;
+                        case 2: difficulty = MEDIUM; break;
+                        case 3: difficulty = HARD; break;
+                        default: difficulty = MEDIUM; break;
+                    }
+                    gameLoop();
+                    break;
+                } else if (gameMode == 2) {
+                    gameLoop();
+                    break;
+                } else if (gameMode == 3) {
+                    continue; // 다시 불러오기 시도
+                } else if (gameMode == 4) {
+                    print_rankings();
+                    break;
+                } else if (gameMode == 5) {
+                    printf("프로그램을 종료합니다...");
+                    cleanupAI();
+                    return 0;
+                }
+            }
         }
     }
     else if(gameMode == 4){
