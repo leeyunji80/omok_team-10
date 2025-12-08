@@ -626,14 +626,13 @@ void showMenu(void);
 void gameLoop(void);
 void SaveGame(const SaveData* data);
 int LoadGame(SaveData* data);
-void manage_fifo(const char* newFilename);
-void get_filename(char* buffer);
 void HandleExit(const SaveData* currentData);
-void ResetGame(SaveData* data);
 void update_game_result(const char* nickname, int did_win);
 void print_rankings(void);
 void gotoxy(int x, int y);
 void hideCursor(int hide);
+cJSON* loadSaveList(void);
+int writeSaveList(cJSON* root);
 
 
 void gotoxy(int x, int y) {
@@ -1026,97 +1025,186 @@ void print_rankings() {
     cJSON_Delete(root);
 }
 
-/*=============저장 및 불러오기============*/
-void get_filename(char* buffer) {
-    time_t t = time(NULL);
-    struct tm tm = *localtime(&t);
-    sprintf(buffer, "%04d%02d%02d_%02d%02d%02d.dat",
-        tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday,
-        tm.tm_hour, tm.tm_min, tm.tm_sec);
-}
+/*=============저장 및 불러오기 (JSON 기반)============*/
+#define SAVE_FILE "game_saves.json"
 
-void manage_fifo(const char* newFilename) {
-    char fileList[MAX_SAVE_SLOTS + 1][256];
-    int count = 0;
-    FILE* fp;
-
-    fp = fopen("save_list.txt", "r");
-    if (fp != NULL) {
-        while (count < MAX_SAVE_SLOTS && fscanf(fp, "%s", fileList[count]) != EOF) {
-            count++;
-        }
-        fclose(fp);
-    }
-
-    if (count >= MAX_SAVE_SLOTS) {
-        remove(fileList[0]);
-        for (int i = 0; i < count - 1; i++) {
-            strcpy(fileList[i], fileList[i + 1]);
-        }
-        count--;
-    }
-
-    strcpy(fileList[count], newFilename);
-    count++;
-
-    fp = fopen("save_list.txt", "w");
-    if (fp != NULL) {
-        for (int i = 0; i < count; i++) {
-            fprintf(fp, "%s\n", fileList[i]);
-        }
-        fclose(fp);
-    }
-}
-void SaveGame(const SaveData* data) {
-    char filename[256];
-    get_filename(filename);
-
-    FILE* fp = fopen(filename, "wb");
+// JSON 파일에서 저장 목록 읽기
+cJSON* loadSaveList() {
+    FILE* fp = fopen(SAVE_FILE, "r");
     if (fp == NULL) {
-        return;
+        return cJSON_CreateArray();
     }
-    fwrite(data, sizeof(SaveData), 1, fp);
+
+    fseek(fp, 0, SEEK_END);
+    long length = ftell(fp);
+    fseek(fp, 0, SEEK_SET);
+
+    if (length <= 0) {
+        fclose(fp);
+        return cJSON_CreateArray();
+    }
+
+    char* buffer = (char*)malloc(length + 1);
+    if (buffer == NULL) {
+        fclose(fp);
+        return cJSON_CreateArray();
+    }
+
+    size_t read_bytes = fread(buffer, 1, length, fp);
+    buffer[read_bytes] = '\0';
     fclose(fp);
 
-    manage_fifo(filename);
+    cJSON* root = cJSON_Parse(buffer);
+    free(buffer);
+
+    if (root == NULL) {
+        return cJSON_CreateArray();
+    }
+
+    return root;
 }
 
-int LoadGame(SaveData* data) {
-    char fileList[MAX_SAVE_SLOTS][256];
-    int count = 0;
-    FILE* fp;
+// JSON 파일에 저장 목록 쓰기
+int writeSaveList(cJSON* root) {
+    char* json_string = cJSON_Print(root);
+    if (json_string == NULL) {
+        return 0;
+    }
 
-    fp = fopen("save_list.txt", "r");
+    FILE* fp = fopen(SAVE_FILE, "w");
     if (fp == NULL) {
+        cJSON_free(json_string);
+        return 0;
+    }
+
+    fprintf(fp, "%s", json_string);
+    fclose(fp);
+    cJSON_free(json_string);
+    return 1;
+}
+
+// 게임 저장 (JSON 기반)
+void SaveGame(const SaveData* data) {
+    cJSON* saveList = loadSaveList();
+
+    // 최대 슬롯 초과 시 가장 오래된 것 삭제
+    while (cJSON_GetArraySize(saveList) >= MAX_SAVE_SLOTS) {
+        cJSON_DeleteItemFromArray(saveList, 0);
+    }
+
+    // 새 저장 데이터 생성
+    cJSON* saveEntry = cJSON_CreateObject();
+
+    // 저장 시간 생성
+    time_t t = time(NULL);
+    struct tm* tm_info = localtime(&t);
+    char timestamp[64];
+    sprintf(timestamp, "%04d-%02d-%02d %02d:%02d:%02d",
+        tm_info->tm_year + 1900, tm_info->tm_mon + 1, tm_info->tm_mday,
+        tm_info->tm_hour, tm_info->tm_min, tm_info->tm_sec);
+
+    cJSON_AddStringToObject(saveEntry, "timestamp", timestamp);
+    cJSON_AddNumberToObject(saveEntry, "gameMode", data->gameMode);
+    cJSON_AddNumberToObject(saveEntry, "currentTurn", data->currentTurn);
+    cJSON_AddNumberToObject(saveEntry, "aiDifficulty", data->aiDifficulty);
+
+    // 보드 상태를 2차원 배열로 저장
+    cJSON* boardArray = cJSON_CreateArray();
+    for (int i = 0; i < SAVE_BOARD_SIZE; i++) {
+        cJSON* rowArray = cJSON_CreateArray();
+        for (int j = 0; j < SAVE_BOARD_SIZE; j++) {
+            cJSON_AddItemToArray(rowArray, cJSON_CreateNumber(data->board[i][j]));
+        }
+        cJSON_AddItemToArray(boardArray, rowArray);
+    }
+    cJSON_AddItemToObject(saveEntry, "board", boardArray);
+
+    // 배열에 추가
+    cJSON_AddItemToArray(saveList, saveEntry);
+
+    // 파일에 저장
+    if (writeSaveList(saveList)) {
+        printf("\n게임이 저장되었습니다! (%s)\n", timestamp);
+    } else {
+        printf("\n저장 실패!\n");
+    }
+
+    cJSON_Delete(saveList);
+}
+
+// 게임 불러오기 (JSON 기반)
+int LoadGame(SaveData* data) {
+    cJSON* saveList = loadSaveList();
+    int count = cJSON_GetArraySize(saveList);
+
+    if (count == 0) {
+        printf("\n저장된 게임이 없습니다.\n");
+        cJSON_Delete(saveList);
         return 0;
     }
 
     printf("\n=======저장된 게임 목록=======\n");
+    printf("%-4s %-20s %-10s %-10s\n", "번호", "저장 시간", "모드", "차례");
+    printf("--------------------------------------------------\n");
 
-    while (count < MAX_SAVE_SLOTS && fscanf(fp, "%s", fileList[count]) != EOF) {
-        printf("%d. %s\n", count + 1, fileList[count]);
-        count++;
+    for (int i = 0; i < count; i++) {
+        cJSON* entry = cJSON_GetArrayItem(saveList, i);
+        cJSON* timestamp = cJSON_GetObjectItem(entry, "timestamp");
+        cJSON* mode = cJSON_GetObjectItem(entry, "gameMode");
+        cJSON* turn = cJSON_GetObjectItem(entry, "currentTurn");
+
+        const char* modeStr = "알수없음";
+        if (mode && mode->valueint == 1) modeStr = "1인용";
+        else if (mode && mode->valueint == 2) modeStr = "2인용";
+
+        const char* turnStr = (turn && turn->valueint == BLACK) ? "흑" : "백";
+
+        printf("%-4d %-20s %-10s %-10s\n",
+            i + 1,
+            timestamp ? timestamp->valuestring : "알수없음",
+            modeStr,
+            turnStr);
     }
-    fclose(fp);
-
-    printf("몇 번 파일의 게임을 불러오시겠습니까? 번호를 입력하세요 :");
-
-    if (count == 0) return 0;
+    printf("--------------------------------------------------\n");
+    printf("불러올 게임 번호를 입력하세요 (0: 취소): ");
 
     int choice;
     scanf("%d", &choice);
 
-    if (choice < 1 || choice > count) return 0;
-
-    char* targetFile = fileList[choice - 1];
-    fp = fopen(targetFile, "rb");
-    if (fp == NULL) {
+    if (choice < 1 || choice > count) {
+        cJSON_Delete(saveList);
         return 0;
     }
 
-    fread(data, sizeof(SaveData), 1, fp);
-    fclose(fp);
+    // 선택한 저장 데이터 로드
+    cJSON* entry = cJSON_GetArrayItem(saveList, choice - 1);
 
+    cJSON* mode = cJSON_GetObjectItem(entry, "gameMode");
+    cJSON* turn = cJSON_GetObjectItem(entry, "currentTurn");
+    cJSON* diff = cJSON_GetObjectItem(entry, "aiDifficulty");
+    cJSON* boardArray = cJSON_GetObjectItem(entry, "board");
+
+    if (mode) data->gameMode = mode->valueint;
+    if (turn) data->currentTurn = turn->valueint;
+    if (diff) data->aiDifficulty = diff->valueint;
+
+    // 보드 상태 복원
+    if (boardArray && cJSON_IsArray(boardArray)) {
+        for (int i = 0; i < SAVE_BOARD_SIZE; i++) {
+            cJSON* rowArray = cJSON_GetArrayItem(boardArray, i);
+            if (rowArray && cJSON_IsArray(rowArray)) {
+                for (int j = 0; j < SAVE_BOARD_SIZE; j++) {
+                    cJSON* cell = cJSON_GetArrayItem(rowArray, j);
+                    if (cell) {
+                        data->board[i][j] = cell->valueint;
+                    }
+                }
+            }
+        }
+    }
+
+    cJSON_Delete(saveList);
+    printf("\n게임을 불러왔습니다!\n");
     return 1;
 }
 
