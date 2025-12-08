@@ -958,6 +958,8 @@ void print_rankings() {
         char time[16];
     } RankPlayer;
 
+    clearScreen();
+
     FILE* fp = NULL;
     char* buffer = NULL;
     long length = 0;
@@ -977,18 +979,37 @@ void print_rankings() {
         fclose(fp);
     }
 
-    if (buffer == NULL) {
-        printf("랭킹 정보가 없습니다.\n");
+    if (buffer == NULL || length == 0) {
+        printf("\n============ 랭킹 (1인용) ============\n");
+        printf("--------------------------------------\n");
+        printf("  아직 등록된 랭킹 정보가 없습니다.\n");
+        printf("  1인용 게임에서 승리하면 랭킹에 등록됩니다.\n");
+        printf("--------------------------------------\n");
+        printf("\n아무 키나 누르면 메뉴로 돌아갑니다...");
+        _getch();
+        if (buffer) free(buffer);
         return;
     }
 
     cJSON* root = cJSON_Parse(buffer);
     free(buffer);
 
-    if (root == NULL) return;
+    if (root == NULL) {
+        printf("\n랭킹 데이터를 읽는 중 오류가 발생했습니다.\n");
+        printf("아무 키나 누르면 메뉴로 돌아갑니다...");
+        _getch();
+        return;
+    }
 
     int size = cJSON_GetArraySize(root);
     if (size == 0) {
+        printf("\n============ 랭킹 (1인용) ============\n");
+        printf("--------------------------------------\n");
+        printf("  아직 등록된 랭킹 정보가 없습니다.\n");
+        printf("  1인용 게임에서 승리하면 랭킹에 등록됩니다.\n");
+        printf("--------------------------------------\n");
+        printf("\n아무 키나 누르면 메뉴로 돌아갑니다...");
+        _getch();
         cJSON_Delete(root);
         return;
     }
@@ -996,9 +1017,14 @@ void print_rankings() {
     RankPlayer* players = (RankPlayer*)malloc(sizeof(RankPlayer) * size);
     if (players == NULL) {
         cJSON_Delete(root);
+        printf("\n메모리 할당 오류가 발생했습니다.\n");
+        printf("아무 키나 누르면 메뉴로 돌아갑니다...");
+        _getch();
         return;
     }
 
+    // 유효한 플레이어 수 카운트
+    int validCount = 0;
     for (int i = 0; i < size; i++) {
         cJSON* item = cJSON_GetArrayItem(root, i);
         cJSON* name = cJSON_GetObjectItem(item, "nickname");
@@ -1008,18 +1034,33 @@ void print_rankings() {
         cJSON* ptime = cJSON_GetObjectItem(item, "time");
 
         if (name && wins && losses && rate && ptime) {
-            strncpy(players[i].nickname, name->valuestring, sizeof(players[i].nickname) - 1);
-            players[i].nickname[sizeof(players[i].nickname) - 1] = '\0';
-            players[i].wins = wins->valueint;
-            players[i].losses = losses->valueint;
-            players[i].win_rate = rate->valuedouble;
-            strncpy(players[i].time, ptime->valuestring, sizeof(players[i].time) - 1);
-            players[i].time[sizeof(players[i].time) - 1] = '\0';
+            strncpy(players[validCount].nickname, name->valuestring, sizeof(players[validCount].nickname) - 1);
+            players[validCount].nickname[sizeof(players[validCount].nickname) - 1] = '\0';
+            players[validCount].wins = wins->valueint;
+            players[validCount].losses = losses->valueint;
+            players[validCount].win_rate = rate->valuedouble;
+            strncpy(players[validCount].time, ptime->valuestring, sizeof(players[validCount].time) - 1);
+            players[validCount].time[sizeof(players[validCount].time) - 1] = '\0';
+            validCount++;
         }
     }
 
-    for (int i = 0; i < size - 1; i++) {
-        for (int j = 0; j < size - 1 - i; j++) {
+    if (validCount == 0) {
+        printf("\n============ 랭킹 (1인용) ============\n");
+        printf("--------------------------------------\n");
+        printf("  아직 등록된 랭킹 정보가 없습니다.\n");
+        printf("  1인용 게임에서 승리하면 랭킹에 등록됩니다.\n");
+        printf("--------------------------------------\n");
+        printf("\n아무 키나 누르면 메뉴로 돌아갑니다...");
+        _getch();
+        free(players);
+        cJSON_Delete(root);
+        return;
+    }
+
+    // 버블 정렬 (승률 내림차순, 동률 시 승수 내림차순)
+    for (int i = 0; i < validCount - 1; i++) {
+        for (int j = 0; j < validCount - 1 - i; j++) {
             int swap_needed = 0;
 
             if (players[j].win_rate < players[j + 1].win_rate) {
@@ -1039,13 +1080,13 @@ void print_rankings() {
         }
     }
 
-    printf("\n====== 랭킹 (상위 5명) ======\n");
-    printf("%-5s %-15s %-10s %-10s %-10s\n", "순위", "닉네임", "승률", "전적", "마지막 플레이");
-    printf("------------------------------------------------------------\n");
+    printf("\n================== 랭킹 (1인용 AI 대전) ==================\n");
+    printf("%-5s %-15s %-10s %-15s %-12s\n", "순위", "닉네임", "승률", "전적", "마지막 플레이");
+    printf("----------------------------------------------------------\n");
 
-    int limit = (size < 5) ? size : 5;
+    int limit = (validCount < 10) ? validCount : 10;  // 상위 10명까지 표시
     for (int i = 0; i < limit; i++) {
-        printf("%-5d %-15s %.1f%% %5d승 %3d패 %11s\n",
+        printf("%-5d %-15s %6.1f%%   %3d승 %3d패    %-12s\n",
             i + 1,
             players[i].nickname,
             players[i].win_rate * 100,
@@ -1053,7 +1094,10 @@ void print_rankings() {
             players[i].losses,
             players[i].time);
     }
-    printf("------------------------------------------------------------\n");
+    printf("----------------------------------------------------------\n");
+    printf("총 %d명의 플레이어가 등록되어 있습니다.\n", validCount);
+    printf("\n아무 키나 누르면 메뉴로 돌아갑니다...");
+    _getch();
 
     free(players);
     cJSON_Delete(root);
@@ -1566,120 +1610,128 @@ if (gameMode == 2) {
     hideCursor(0);
 }
 
+// 메뉴 화면 출력 함수
+void showMainMenu() {
+    clearScreen();
+    printf("\n=========== 오목 게임 ===========\n");
+    printf("  1. 1인용 게임 (vs AI)\n");
+    printf("  2. 2인용 게임 (vs 플레이어)\n");
+    printf("  3. 게임 불러오기\n");
+    printf("  4. 랭킹 확인하기 (1인용)\n");
+    printf("  5. 종료\n");
+    printf("==================================\n");
+    printf("메뉴 번호를 입력하세요 (1~5): ");
+}
+
+// 난이도 선택 함수
+int selectDifficulty() {
+    clearScreen();
+    int diffChoice;
+    printf("\n======= 난이도 선택 =======\n");
+    printf("  1. 쉬움 (Easy)\n");
+    printf("  2. 보통 (Medium)\n");
+    printf("  3. 어려움 (Hard)\n");
+    printf("===========================\n");
+    printf("난이도를 선택하세요 (1~3): ");
+    scanf("%d", &diffChoice);
+    switch(diffChoice) {
+        case 1: return EASY;
+        case 2: return MEDIUM;
+        case 3: return HARD;
+        default: return MEDIUM;
+    }
+}
+
 int main() {
     srand((unsigned int)time(NULL));
     initBoard();
     initAI();
 
-    printf("\n=========시작화면=======\n");
-    printf("1. 1인용 게임 \n");
-    printf("2. 2인용 게임 \n");
-    printf("3. 게임 불러오기 \n");
-    printf("4. 랭킹 확인하기(1인용) \n");
-    printf("5. 종료\n");
-    printf("============================\n");
-    printf("메뉴 번호를 입력하세요. (1~5): ");
-    scanf("%d", &gameMode);
+    int running = 1;
 
-    if(gameMode == 1){
-        clearScreen();
-        int diffChoice;
-        printf("\n======= 난이도 선택 =======\n");
-        printf("1. 쉬움 (Easy)\n");
-        printf("2. 보통 (Medium)\n");
-        printf("3. 어려움 (Hard)\n");
-        printf("===========================\n");
-        printf("난이도를 선택하세요 (1~3): ");
-        scanf("%d", &diffChoice);
-        switch(diffChoice) {
-            case 1: difficulty = EASY; break;
-            case 2: difficulty = MEDIUM; break;
-            case 3: difficulty = HARD; break;
-            default: difficulty = MEDIUM; break;
-        }
-        gameLoop();
-    }
-    else if(gameMode == 2){
-        gameLoop();
-    }
-    else if(gameMode == 3){
-        while (1) {
-            if (LoadSelectedGame()) {
-                printf("아무 키나 누르면 게임을 시작합니다...");
-                _getch();
+    while (running) {
+        showMainMenu();
+        scanf("%d", &gameMode);
+
+        switch (gameMode) {
+            case 1:  // 1인용 게임
+                difficulty = selectDifficulty();
+                initBoard();
+                currentPlayer = BLACK;
+                gameEndedByVictory = 0;
                 gameLoop();
-                break;
-            } else {
-                printf("\n아무 키나 누르면 메뉴로 돌아갑니다...");
-                _getch();
-                clearScreen();
-                printf("\n=========시작화면=======\n");
-                printf("1. 1인용 게임 \n");
-                printf("2. 2인용 게임 \n");
-                printf("3. 게임 불러오기 \n");
-                printf("4. 랭킹 확인하기(1인용) \n");
-                printf("5. 종료\n");
-                printf("============================\n");
-                printf("메뉴 번호를 입력하세요. (1~5): ");
-                scanf("%d", &gameMode);
 
-                if (gameMode == 1) {
-                    clearScreen();
-                    int diffChoice;
-                    printf("\n======= 난이도 선택 =======\n");
-                    printf("1. 쉬움 (Easy)\n");
-                    printf("2. 보통 (Medium)\n");
-                    printf("3. 어려움 (Hard)\n");
-                    printf("===========================\n");
-                    printf("난이도를 선택하세요 (1~3): ");
-                    scanf("%d", &diffChoice);
-                    switch(diffChoice) {
-                        case 1: difficulty = EASY; break;
-                        case 2: difficulty = MEDIUM; break;
-                        case 3: difficulty = HARD; break;
-                        default: difficulty = MEDIUM; break;
-                    }
-                    gameLoop();
-                    break;
-                } else if (gameMode == 2) {
-                    gameLoop();
-                    break;
-                } else if (gameMode == 3) {
-                    continue; // 다시 불러오기 시도
-                } else if (gameMode == 4) {
-                    print_rankings();
-                    break;
-                } else if (gameMode == 5) {
-                    printf("프로그램을 종료합니다...");
-                    cleanupAI();
-                    return 0;
+                // 게임 종료 후 저장 여부 확인
+                if (gameEndedByVictory == 0) {
+                    SaveData currentData;
+                    for (int i = 0; i < SAVE_BOARD_SIZE; i++)
+                        for (int j = 0; j < SAVE_BOARD_SIZE; j++)
+                            currentData.board[i][j] = (i < SIZE && j < SIZE) ? board[i][j] : 0;
+                    currentData.currentTurn = currentPlayer;
+                    currentData.gameMode = gameMode;
+                    currentData.aiDifficulty = difficulty;
+                    HandleExit(&currentData);
                 }
-            }
+                break;
+
+            case 2:  // 2인용 게임
+                initBoard();
+                currentPlayer = BLACK;
+                gameEndedByVictory = 0;
+                gameLoop();
+
+                // 게임 종료 후 저장 여부 확인
+                if (gameEndedByVictory == 0) {
+                    SaveData currentData;
+                    for (int i = 0; i < SAVE_BOARD_SIZE; i++)
+                        for (int j = 0; j < SAVE_BOARD_SIZE; j++)
+                            currentData.board[i][j] = (i < SIZE && j < SIZE) ? board[i][j] : 0;
+                    currentData.currentTurn = currentPlayer;
+                    currentData.gameMode = gameMode;
+                    currentData.aiDifficulty = difficulty;
+                    HandleExit(&currentData);
+                }
+                break;
+
+            case 3:  // 게임 불러오기
+                if (LoadSelectedGame()) {
+                    printf("아무 키나 누르면 게임을 시작합니다...");
+                    _getch();
+                    gameEndedByVictory = 0;
+                    gameLoop();
+
+                    // 게임 종료 후 저장 여부 확인
+                    if (gameEndedByVictory == 0) {
+                        SaveData currentData;
+                        for (int i = 0; i < SAVE_BOARD_SIZE; i++)
+                            for (int j = 0; j < SAVE_BOARD_SIZE; j++)
+                                currentData.board[i][j] = (i < SIZE && j < SIZE) ? board[i][j] : 0;
+                        currentData.currentTurn = currentPlayer;
+                        currentData.gameMode = gameMode;
+                        currentData.aiDifficulty = difficulty;
+                        HandleExit(&currentData);
+                    }
+                }
+                // 불러오기 실패/취소 시 자동으로 메뉴로 돌아감
+                break;
+
+            case 4:  // 랭킹 확인
+                print_rankings();
+                // 랭킹 확인 후 자동으로 메뉴로 돌아감
+                break;
+
+            case 5:  // 종료
+                running = 0;
+                break;
+
+            default:
+                printf("잘못된 입력입니다. 다시 선택해주세요.\n");
+                Sleep(1000);
+                break;
         }
     }
-    else if(gameMode == 4){
-        print_rankings();
-    }
-    else if(gameMode == 5){
-        printf("프로그램을 종료합니다...");
-        return 0;
-    }
 
-    if(gameMode == 1 || gameMode == 2 || gameMode == 3){
-        if(gameEndedByVictory == 0){
-        SaveData currentData;
-        for (int i = 0; i < SAVE_BOARD_SIZE; i++)
-        for (int j = 0; j < SAVE_BOARD_SIZE; j++)
-            currentData.board[i][j] = (i < SIZE && j < SIZE) ? board[i][j] : 0;
-    currentData.currentTurn = currentPlayer;
-    currentData.gameMode = gameMode;
-
-    HandleExit(&currentData);
-        }
-    }
-
-     printf("\n게임이 종료되었습니다. 아무 키나 누르면 콘솔이 닫힙니다...\n");
-     _getch();
+    printf("\n프로그램을 종료합니다...\n");
     cleanupAI();
     return 0;
 }
