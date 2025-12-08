@@ -1197,13 +1197,23 @@ void SaveGame(const SaveData* data) {
 
     // 덮어쓰기 확인
     if (slotIndex < count) {
-        printf("슬롯 %d에 이미 저장된 게임이 있습니다. 덮어쓰시겠습니까? (Y/N): ", choice);
-        char confirm = _getch();
-        printf("%c\n", confirm);
-        if (confirm != 'Y' && confirm != 'y') {
-            printf("저장이 취소되었습니다.\n");
-            cJSON_Delete(saveList);
-            return;
+        cJSON* existingEntry = cJSON_GetArrayItem(saveList, slotIndex);
+        cJSON* existingTs = cJSON_GetObjectItem(existingEntry, "timestamp");
+
+        // 빈 슬롯이 아닌 경우에만 덮어쓰기 확인
+        if (existingTs && strlen(existingTs->valuestring) > 0) {
+            printf("슬롯 %d에 이미 저장된 게임이 있습니다. 덮어쓰시겠습니까? (Y/N): ", choice);
+            // 입력 버퍼 비우기
+            int c;
+            while ((c = getchar()) != '\n' && c != EOF);
+
+            char confirm = _getch();
+            printf("%c\n", confirm);
+            if (confirm != 'Y' && confirm != 'y') {
+                printf("저장이 취소되었습니다.\n");
+                cJSON_Delete(saveList);
+                return;
+            }
         }
     }
 
