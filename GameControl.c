@@ -958,7 +958,9 @@ void print_rankings() {
         char time[16];
     } RankPlayer;
 
-    clearScreen();
+    // 화면 지우기 (ANSI escape code 직접 사용)
+    printf("\033[2J\033[H");
+    fflush(stdout);
 
     FILE* fp = NULL;
     char* buffer = NULL;
@@ -1658,6 +1660,9 @@ int main() {
     while (running) {
         showMainMenu();
         scanf("%d", &gameMode);
+        // 입력 버퍼 비우기
+        int c;
+        while ((c = getchar()) != '\n' && c != EOF);
 
         switch (gameMode) {
             case 1:  // 1인용 게임
