@@ -1,21 +1,22 @@
 #define _CRT_SECURE_NO_WARNINGS
 #include <stdio.h>
 #include <stdlib.h>
-#include "cJSON.h"
-#include <conio.h>
-#include <stdlib.h>
 #include <time.h>
-#include <windows.h>
 #include <ctype.h>
 #include <string.h>
+#include "cJSON.h"
 #include "minimax.h"
 
 #ifdef _WIN32
     #include <conio.h>
     #include <windows.h>
+    #define CLEAR_SCREEN "cls"
 #else
     #include <termios.h>
     #include <unistd.h>
+    #include <sys/time.h>
+    #include <sys/select.h>
+    #define CLEAR_SCREEN "clear"
 
     // Unix/macOS용 getch 구현
     int _getch(void) {
@@ -30,10 +31,44 @@
         return ch;
     }
 
+    // Unix/macOS용 _kbhit 구현
+    int _kbhit(void) {
+        struct termios oldt, newt;
+        int ch;
+        int oldf;
+
+        tcgetattr(STDIN_FILENO, &oldt);
+        newt = oldt;
+        newt.c_lflag &= ~(ICANON | ECHO);
+        tcsetattr(STDIN_FILENO, TCSANOW, &newt);
+
+        struct timeval tv;
+        fd_set rdfs;
+        tv.tv_sec = 0;
+        tv.tv_usec = 0;
+        FD_ZERO(&rdfs);
+        FD_SET(STDIN_FILENO, &rdfs);
+        select(STDIN_FILENO + 1, &rdfs, NULL, NULL, &tv);
+        int ret = FD_ISSET(STDIN_FILENO, &rdfs);
+
+        tcsetattr(STDIN_FILENO, TCSANOW, &oldt);
+        return ret;
+    }
+
     // Unix/macOS용 Sleep 구현 (밀리초)
-    void Sleep(int ms) {
+    void Sleep(unsigned int ms) {
         usleep(ms * 1000);
     }
+
+    // Unix/macOS용 GetTickCount 구현 (밀리초)
+    unsigned long GetTickCount(void) {
+        struct timeval tv;
+        gettimeofday(&tv, NULL);
+        return (tv.tv_sec * 1000) + (tv.tv_usec / 1000);
+    }
+
+    // DWORD 타입 정의
+    typedef unsigned long DWORD;
 #endif
 
 #define SIZE 15
@@ -688,9 +723,8 @@ void printTemporaryMessage(const char* msg, int seconds) {
 }
 
 void printRemainTime(int remain) {
-    COORD pos = { 0, 0};
-    SetConsoleCursorPosition(GetStdHandle(STD_OUTPUT_HANDLE), pos);
-    printf("남은 시간 : %2d초  ", remain); // 숫자만 바뀌게 공백 포함
+    gotoxy(0, 0);
+    printf("남은 시간 : %2d초  ", remain);
     fflush(stdout);
 }
 
@@ -805,14 +839,6 @@ int checkWinGameplay(int x, int y) {
     return 0;
 }
 
-void printRemainTime(int remain) {
-    // 커서를 바둑판 좌측 상단에 고정
-    COORD pos = { 0, 0 }; // 좌측 상단
-    SetConsoleCursorPosition(GetStdHandle(STD_OUTPUT_HANDLE), pos);
-    printf("남은 시간: %2d초  ", remain); // 남은 자리 공백으로 덮어쓰기
-    fflush(stdout);
-}
-
 /*===============랭킹 관련 함수===============*/
 
 void update_game_result(const char* nickname, int did_win) {
@@ -820,25 +846,27 @@ void update_game_result(const char* nickname, int did_win) {
     FILE* fp = NULL;
     char* buffer = NULL;
     long length = 0;
-    time_t tim=time(NULL);
-    struct tm tm = *localtime(&tim);
+    time_t tim = time(NULL);
+    struct tm* tm_ptr = localtime(&tim);
     char date_str[16];
-    sprintf_s(date_str, sizeof(date_str), "%02d/%02d", tm.tm_mon + 1, tm.tm_mday);
+    snprintf(date_str, sizeof(date_str), "%02d/%02d", tm_ptr->tm_mon + 1, tm_ptr->tm_mday);
 
-    fopen_s(&fp, "user_data.json", "r");
+    fp = fopen("user_data.json", "r");
 
-    fseek(fp, 0, SEEK_END);
-    length = ftell(fp);
-    fseek(fp, 0, SEEK_SET);
+    if (fp != NULL) {
+        fseek(fp, 0, SEEK_END);
+        length = ftell(fp);
+        fseek(fp, 0, SEEK_SET);
 
-    if (length > 0) {
-        buffer = (char*)malloc(length + 1);
-        if (buffer) {
-            size_t read_bytes = fread(buffer, 1, length, fp);
-            buffer[read_bytes] = '\0';
+        if (length > 0) {
+            buffer = (char*)malloc(length + 1);
+            if (buffer) {
+                size_t read_bytes = fread(buffer, 1, length, fp);
+                buffer[read_bytes] = '\0';
+            }
         }
+        fclose(fp);
     }
-    fclose(fp);
 
     if (buffer == NULL) {
         root = cJSON_CreateArray();
@@ -846,6 +874,9 @@ void update_game_result(const char* nickname, int did_win) {
     else {
         root = cJSON_Parse(buffer);
         free(buffer);
+        if (root == NULL) {
+            root = cJSON_CreateArray();
+        }
     }
 
     int found = 0;
@@ -904,15 +935,15 @@ void update_game_result(const char* nickname, int did_win) {
         cJSON_AddNumberToObject(new_player, "win_rate", win_rate);
         cJSON_AddStringToObject(new_player, "time", date_str);
         cJSON_AddItemToArray(root, new_player);
-
     }
 
     char* json_string = cJSON_Print(root);
 
-    fopen_s(&fp, "user_data.json", "w");
-
-    fprintf_s(fp, "%s", json_string);
-    fclose(fp);
+    fp = fopen("user_data.json", "w");
+    if (fp != NULL) {
+        fprintf(fp, "%s", json_string);
+        fclose(fp);
+    }
 
     cJSON_free(json_string);
     cJSON_Delete(root);
@@ -924,14 +955,15 @@ void print_rankings() {
         int wins;
         int losses;
         double win_rate;
-        char time[6];
+        char time[16];
     } RankPlayer;
 
     FILE* fp = NULL;
     char* buffer = NULL;
     long length = 0;
 
-    if (fopen_s(&fp, "user_data.json", "r") == 0 && fp != NULL) {
+    fp = fopen("user_data.json", "r");
+    if (fp != NULL) {
         fseek(fp, 0, SEEK_END);
         length = ftell(fp);
         fseek(fp, 0, SEEK_SET);
@@ -973,14 +1005,16 @@ void print_rankings() {
         cJSON* wins = cJSON_GetObjectItem(item, "wins");
         cJSON* losses = cJSON_GetObjectItem(item, "losses");
         cJSON* rate = cJSON_GetObjectItem(item, "win_rate");
-        cJSON* time = cJSON_GetObjectItem(item, "time");
+        cJSON* ptime = cJSON_GetObjectItem(item, "time");
 
-        if (name && wins && losses && rate && time) {
-            strcpy_s(players[i].nickname, sizeof(players[i].nickname), name->valuestring);
+        if (name && wins && losses && rate && ptime) {
+            strncpy(players[i].nickname, name->valuestring, sizeof(players[i].nickname) - 1);
+            players[i].nickname[sizeof(players[i].nickname) - 1] = '\0';
             players[i].wins = wins->valueint;
             players[i].losses = losses->valueint;
             players[i].win_rate = rate->valuedouble;
-            strcpy_s(players[i].time, sizeof(players[i].time), time->valuestring);
+            strncpy(players[i].time, ptime->valuestring, sizeof(players[i].time) - 1);
+            players[i].time[sizeof(players[i].time) - 1] = '\0';
         }
     }
 
