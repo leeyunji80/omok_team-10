@@ -986,6 +986,7 @@ void print_rankings() {
         printf("  1인용 게임에서 승리하면 랭킹에 등록됩니다.\n");
         printf("--------------------------------------\n");
         printf("\n아무 키나 누르면 메뉴로 돌아갑니다...");
+        fflush(stdout);
         _getch();
         if (buffer) free(buffer);
         return;
@@ -997,6 +998,7 @@ void print_rankings() {
     if (root == NULL) {
         printf("\n랭킹 데이터를 읽는 중 오류가 발생했습니다.\n");
         printf("아무 키나 누르면 메뉴로 돌아갑니다...");
+        fflush(stdout);
         _getch();
         return;
     }
@@ -1009,6 +1011,7 @@ void print_rankings() {
         printf("  1인용 게임에서 승리하면 랭킹에 등록됩니다.\n");
         printf("--------------------------------------\n");
         printf("\n아무 키나 누르면 메뉴로 돌아갑니다...");
+        fflush(stdout);
         _getch();
         cJSON_Delete(root);
         return;
@@ -1019,6 +1022,7 @@ void print_rankings() {
         cJSON_Delete(root);
         printf("\n메모리 할당 오류가 발생했습니다.\n");
         printf("아무 키나 누르면 메뉴로 돌아갑니다...");
+        fflush(stdout);
         _getch();
         return;
     }
@@ -1052,6 +1056,7 @@ void print_rankings() {
         printf("  1인용 게임에서 승리하면 랭킹에 등록됩니다.\n");
         printf("--------------------------------------\n");
         printf("\n아무 키나 누르면 메뉴로 돌아갑니다...");
+        fflush(stdout);
         _getch();
         free(players);
         cJSON_Delete(root);
@@ -1097,6 +1102,7 @@ void print_rankings() {
     printf("----------------------------------------------------------\n");
     printf("총 %d명의 플레이어가 등록되어 있습니다.\n", validCount);
     printf("\n아무 키나 누르면 메뉴로 돌아갑니다...");
+    fflush(stdout);
     _getch();
 
     free(players);
