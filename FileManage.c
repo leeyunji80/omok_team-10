@@ -295,16 +295,25 @@ int LoadGame(SaveData* data) {
         return 0;
     }
 
+    printf("\n=======저장된 게임 목록=======\n");
+
     while (count < MAX_SAVE_SLOTS && fscanf(fp, "%s", fileList[count]) != EOF) {
         printf("%d. %s\n", count + 1, fileList[count]);
         count++;
     }
     fclose(fp);
 
+    printf("몇 번 파일의 게임을 불러오시겠습니까? 번호를 입력하세요 :");
+
     if (count == 0) return 0;
 
     int choice;
-    scanf("%d", &choice);
+   
+    if (scanf_s("%d", &choice) != 1) { 
+        while (getchar() != '\n');
+        return 0;
+    }
+    while (getchar() != '\n');
 
     if (choice < 1 || choice > count) return 0;
 
