@@ -6,6 +6,26 @@
 #include <time.h>
 #include <conio.h>
 #include <ctype.h>
+#define DATA_FILE "user_data.json"
+
+typedef struct {
+    char nickname[50];
+    int wins;
+    int losses;
+    double win_rate;
+    char time[20];
+} RankPlayer;
+
+int compare_players(const void* a, const void* b) {
+    RankPlayer* p1 = (RankPlayer*)a;
+    RankPlayer* p2 = (RankPlayer*)b;
+
+    if (p1->win_rate < p2->win_rate) return 1;
+    if (p1->win_rate > p2->win_rate) return -1;
+    if (p1->wins < p2->wins) return 1;
+    if (p1->wins > p2->wins) return -1;
+    return 0;
+}
 
 void update_game_result(const char* nickname, int did_win) {
     cJSON* root = NULL;
@@ -117,13 +137,6 @@ void update_game_result(const char* nickname, int did_win) {
 }
 
 void print_rankings() {
-    typedef struct {
-        char nickname[50];
-        int wins;
-        int losses;
-        double win_rate;
-        char time[6];
-    } RankPlayer;
 
     FILE* fp = NULL;
     char* buffer = NULL;
@@ -183,26 +196,7 @@ void print_rankings() {
         }
     }
 
-    for (int i = 0; i < size - 1; i++) {
-        for (int j = 0; j < size - 1 - i; j++) {
-            int swap_needed = 0;
-
-            if (players[j].win_rate < players[j + 1].win_rate) {
-                swap_needed = 1;
-            }
-            else if (players[j].win_rate == players[j + 1].win_rate) {
-                if (players[j].wins < players[j + 1].wins) {
-                    swap_needed = 1;
-                }
-            }
-
-            if (swap_needed) {
-                RankPlayer temp = players[j];
-                players[j] = players[j + 1];
-                players[j + 1] = temp;
-            }
-        }
-    }
+    qsort(players, size, sizeof(RankPlayer), compare_players);
     
     system("cls");
     printf("\n====== 랭킹 (상위 5명) ======\n");
