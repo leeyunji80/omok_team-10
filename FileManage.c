@@ -343,12 +343,8 @@ void HandleExit(const SaveData* currentData) {
 }
 
 void ResetGame(SaveData* data) {
-    for (int i = 0; i < SAVE_BOARD_SIZE; i++) {
-        for (int j = 0; j < SAVE_BOARD_SIZE; j++) {
-            data->board[i][j] = 0;
-        }
-    }
-
+    memset(data->board, 0, sizeof(data->board));
+    
     data->currentTurn = 1;
     data->gameMode = 2;
 }
