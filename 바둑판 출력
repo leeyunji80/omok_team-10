@@ -58,14 +58,24 @@ void Board() {
     int r, c;
     char row_label = 'A'; // 행 라벨 시작점
 
-    system("clear"); 
+   #ifdef _WIN32
+    system("cls");
+#else
+    system("clear");
+#endif
 
-    
-    printf("   "); 
+    printf("   ");
     for (c = 1; c <= BOARD_SIZE; c++) {
-        printf(" %2d", c); 
+        printf(" %2d", c);
     }
     printf("\n");
+}
+
+int main() {
+    initialize_board();
+    Board();
+    return 0;
+}
 
     
     for (r = 0; r < BOARD_SIZE; r++) {
@@ -89,6 +99,8 @@ int main() {
     board[7][7] = 'x'; // 흑돌 테스트
     board[7][8] = 'o'; // 백돌 테스트
     Board();
+
+return 0;
     
 }
 int place_stone(int row, int col, char stone) {
