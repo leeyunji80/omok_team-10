@@ -1658,8 +1658,21 @@ void gameLoop() {
                 printf("백돌(AI) 승리!\n");
                 if(gameMode == 1){
                     fflush(stdin);
-                    printf("\n닉네임을 입력하세요:");
-					scanf("%s", player_nickname);
+                    while(1){
+                        printf("\n닉네임을 입력하세요(15자 이내):");
+					    scanf("%s", player_nickname);
+                        if(strlen(player_nickname)>15){
+                            printf("닉네임이 너무 깁니다.\n");
+                            _getch();
+                            printf("\x1b[1F");
+                            printf("\x1b[2K");
+                            printf("\x1b[1F");
+                            printf("\x1b[2K");
+                            printf("\x1b[1F");
+                            printf("\x1b[2K");
+                        }
+                        else break;
+                    }
                     update_game_result(player_nickname, 0, 1, difficulty);
                 }
                 break;
@@ -1732,14 +1745,40 @@ if (gameMode == 2) {
                         // 1인용: 플레이어가 흑, AI가 백
                         if(winner == BLACK){
                             fflush(stdin);
-                            printf("\n닉네임을 입력하세요:");
-                            scanf("%s", player_nickname);
+                            while(1){
+                                printf("\n닉네임을 입력하세요(15자 이내):");
+    	    				    scanf("%s", player_nickname);
+                                if(strlen(player_nickname)>15){
+                                printf("닉네임이 너무 깁니다.\n");
+                                _getch();
+                                printf("\x1b[1F");
+                                printf("\x1b[2K");
+                                printf("\x1b[1F");
+                                printf("\x1b[2K");
+                                printf("\x1b[1F");
+                                printf("\x1b[2K");
+                                }
+                                else break;
+                            }
                             update_game_result(player_nickname, 1, 1, difficulty);
                         }
                         else {
                             fflush(stdin);
-                            printf("\n닉네임을 입력하세요:");
-                            scanf("%s", player_nickname);
+                            while(1){
+                                printf("\n닉네임을 입력하세요(15자 이내):");
+	    	    			    scanf("%s", player_nickname);
+                                if(strlen(player_nickname)>15){
+                                    printf("닉네임이 너무 깁니다.\n");
+                                    _getch();
+                                    printf("\x1b[1F");
+                                    printf("\x1b[2K");
+                                    printf("\x1b[1F");
+                                    printf("\x1b[2K");
+                                    printf("\x1b[1F");
+                                    printf("\x1b[2K");
+                                }
+                                else break;
+                            }
                             update_game_result(player_nickname, 0, 1, difficulty);
                         }
                     }
@@ -1847,12 +1886,34 @@ int main() {
             case 2:  /* 2인용 게임 */
                 clearScreen();
                 printf("\n======= 2인용 게임 - 플레이어 등록 =======\n");
-                printf("흑돌(선공) 플레이어 닉네임: ");
-                fflush(stdout);
-                scanf("%s", player1_nickname);
-                printf("백돌(후공) 플레이어 닉네임: ");
-                fflush(stdout);
-                scanf("%s", player2_nickname);
+                while(1){
+                    printf("흑돌(선공) 플레이어 닉네임(15자 이내): ");
+                    fflush(stdout);
+				    scanf("%s", player1_nickname);
+                    if(strlen(player1_nickname)>15){
+                        printf("닉네임이 너무 깁니다.\n");
+                        _getch();
+                        printf("\x1b[1F");
+                        printf("\x1b[2K");
+                        printf("\x1b[1F");
+                        printf("\x1b[2K");
+                    }
+                    else break;
+                }
+                while(1){
+                    printf("백돌(후공) 플레이어 닉네임(15자 이내): ");
+                    fflush(stdout);
+				    scanf("%s", player2_nickname);
+                    if(strlen(player2_nickname)>15){
+                        printf("닉네임이 너무 깁니다.\n");
+                        _getch();
+                        printf("\x1b[1F");
+                        printf("\x1b[2K");
+                        printf("\x1b[1F");
+                        printf("\x1b[2K");
+                    }
+                    else break;
+                }
                 printf("\n게임을 시작합니다! (%s vs %s)\n", player1_nickname, player2_nickname);
                 printf("아무 키나 누르면 게임이 시작됩니다...");
                 fflush(stdout);
