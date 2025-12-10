@@ -1802,11 +1802,10 @@ int selectDifficulty() {
 
 /*==========네트워크 게임 관련 함수=============*/
 
-/* 서버 연결 및 매칭 */
-int connectAndMatch(const char* serverIP, int port) {
+/* 서버 연결 */
+int connectToServer(const char* serverIP, int port) {
     NetMessage msg;
     NetMessage response;
-    int waitingForMatch = 1;
 
     printf("\n서버에 연결 중... (%s:%d)\n", serverIP, port);
 
@@ -1851,51 +1850,56 @@ int connectAndMatch(const char* serverIP, int port) {
         return 0;
     }
 
-    printf("%s\n", response.message);
+    printf("%s\n\n", response.message);
+    return 1;
+}
 
-    /* 매칭 요청 */
+/* 방 생성 */
+int createRoom(const char* roomName) {
+    NetMessage msg;
+    NetMessage response;
+    int waiting = 1;
+
     memset(&msg, 0, sizeof(msg));
-    msg.type = MSG_MATCH_REQUEST;
+    msg.type = MSG_ROOM_CREATE;
+    strncpy(msg.nickname, roomName, sizeof(msg.nickname) - 1);
+
     if (net_send_message(netSocket, &msg) != 0) {
-        printf("매칭 요청 실패\n");
-        CLOSE_SOCKET(netSocket);
-        net_cleanup();
+        printf("방 생성 요청 실패\n");
         return 0;
     }
 
-    printf("\n상대방을 찾는 중...\n");
-    printf("(ESC를 누르면 취소)\n\n");
+    /* 응답 대기 */
+    if (net_recv_message(netSocket, &response) != 0) {
+        printf("서버 응답 실패\n");
+        return 0;
+    }
 
-    /* 매칭 대기 */
-    while (waitingForMatch) {
-        /* 키 입력 확인 (ESC로 취소) */
-        if (_kbhit()) {
-            int key = _getch();
-            if (key == 27) { /* ESC */
-                memset(&msg, 0, sizeof(msg));
-                msg.type = MSG_MATCH_CANCEL;
-                net_send_message(netSocket, &msg);
-                printf("매칭이 취소되었습니다.\n");
-                CLOSE_SOCKET(netSocket);
-                net_cleanup();
-                return 0;
+    if (response.type == MSG_ROOM_CREATE_ACK) {
+        printf("%s\n", response.message);
+        printf("(상대방이 입장하면 게임이 시작됩니다)\n\n");
+
+        /* 상대방 입장 대기 */
+        while (waiting) {
+            if (_kbhit()) {
+                int key = _getch();
+                if (key == 27) { /* ESC */
+                    memset(&msg, 0, sizeof(msg));
+                    msg.type = MSG_ROOM_LEAVE;
+                    net_send_message(netSocket, &msg);
+                    printf("방을 나갔습니다.\n");
+                    return 0;
+                }
             }
-        }
 
-        /* 서버 메시지 확인 */
-        if (net_recv_message_nonblock(netSocket, &response) == 0) {
-            switch (response.type) {
-                case MSG_WAITING:
-                    printf("대기 중: %s\n", response.message);
-                    break;
-
-                case MSG_GAME_START:
+            if (net_recv_message_nonblock(netSocket, &response) == 0) {
+                if (response.type == MSG_GAME_START) {
                     myColor = response.player;
                     strncpy(opponentNickname, response.nickname, sizeof(opponentNickname) - 1);
-                    isMyTurn = (myColor == 1) ? 1 : 0; /* 흑이 선공 */
+                    isMyTurn = (myColor == 1) ? 1 : 0;
 
                     printf("\n========================================\n");
-                    printf("  매칭 성공!\n");
+                    printf("  상대방 입장!\n");
                     printf("  상대방: %s\n", opponentNickname);
                     printf("  내 돌: %s (%s)\n",
                            (myColor == 1) ? "흑돌" : "백돌",
@@ -1904,20 +1908,146 @@ int connectAndMatch(const char* serverIP, int port) {
                     printf("\n아무 키나 누르면 게임을 시작합니다...");
                     fflush(stdout);
                     _getch();
-
-                    waitingForMatch = 0;
                     return 1;
-
-                case MSG_ERROR:
-                    printf("오류: %s\n", response.message);
-                    break;
-
-                default:
-                    break;
+                }
             }
+            Sleep(100);
+        }
+    } else if (response.type == MSG_ERROR) {
+        printf("오류: %s\n", response.message);
+    }
+
+    return 0;
+}
+
+/* 방 목록 표시 및 선택 */
+int showRoomList(void) {
+    NetMessage msg;
+    NetMessage response;
+    int i;
+    int choice;
+    int c;
+
+    while (1) {
+        clearScreen();
+        printf("\n========== 방 목록 ==========\n\n");
+
+        /* 방 목록 요청 */
+        memset(&msg, 0, sizeof(msg));
+        msg.type = MSG_ROOM_LIST;
+        if (net_send_message(netSocket, &msg) != 0) {
+            printf("방 목록 요청 실패\n");
+            return -1;
         }
 
-        Sleep(100);
+        /* 응답 대기 */
+        if (net_recv_message(netSocket, &response) != 0) {
+            printf("서버 응답 실패\n");
+            return -1;
+        }
+
+        if (response.type != MSG_ROOM_LIST_RESP) {
+            printf("잘못된 응답\n");
+            return -1;
+        }
+
+        if (response.y == 0) {
+            printf("  (대기 중인 방이 없습니다)\n\n");
+        } else {
+            printf("  번호 | 방 이름            | 방장          | 인원\n");
+            printf("  -----+--------------------+---------------+------\n");
+            for (i = 0; i < response.y; i++) {
+                printf("  %3d  | %-18s | %-13s | %d/2 %s\n",
+                       response.rooms[i].roomId,
+                       response.rooms[i].roomName,
+                       response.rooms[i].hostName,
+                       response.rooms[i].playerCount,
+                       response.rooms[i].inGame ? "(게임중)" : "");
+            }
+            printf("\n");
+        }
+
+        printf("================================\n");
+        printf("  입장할 방 번호를 입력하세요\n");
+        printf("  (0: 새로고침, -1: 돌아가기): ");
+        fflush(stdout);
+
+        scanf("%d", &choice);
+        while ((c = getchar()) != '\n' && c != EOF);
+
+        if (choice == -1) {
+            return -1;
+        } else if (choice == 0) {
+            continue; /* 새로고침 */
+        } else if (choice > 0) {
+            return choice; /* 방 ID 반환 */
+        }
+    }
+}
+
+/* 방 입장 */
+int joinRoom(int roomId) {
+    NetMessage msg;
+    NetMessage response;
+
+    memset(&msg, 0, sizeof(msg));
+    msg.type = MSG_ROOM_JOIN;
+    msg.x = roomId;
+
+    if (net_send_message(netSocket, &msg) != 0) {
+        printf("방 입장 요청 실패\n");
+        return 0;
+    }
+
+    /* 응답 대기 */
+    if (net_recv_message(netSocket, &response) != 0) {
+        printf("서버 응답 실패\n");
+        return 0;
+    }
+
+    switch (response.type) {
+        case MSG_ROOM_JOIN_ACK:
+            printf("%s\n", response.message);
+            /* 게임 시작 메시지 대기 */
+            if (net_recv_message(netSocket, &response) == 0 &&
+                response.type == MSG_GAME_START) {
+                myColor = response.player;
+                strncpy(opponentNickname, response.nickname, sizeof(opponentNickname) - 1);
+                isMyTurn = (myColor == 1) ? 1 : 0;
+
+                printf("\n========================================\n");
+                printf("  게임 시작!\n");
+                printf("  상대방: %s\n", opponentNickname);
+                printf("  내 돌: %s (%s)\n",
+                       (myColor == 1) ? "흑돌" : "백돌",
+                       (myColor == 1) ? "선공" : "후공");
+                printf("========================================\n");
+                printf("\n아무 키나 누르면 게임을 시작합니다...");
+                fflush(stdout);
+                _getch();
+                return 1;
+            }
+            break;
+
+        case MSG_ROOM_NOT_FOUND:
+            printf("방을 찾을 수 없습니다.\n");
+            Sleep(1000);
+            break;
+
+        case MSG_ROOM_FULL:
+            printf("방이 가득 찼습니다.\n");
+            Sleep(1000);
+            break;
+
+        case MSG_ERROR:
+            printf("오류: %s\n", response.message);
+            Sleep(1000);
+            break;
+
+        default:
+            printf("알 수 없는 응답\n");
+            Sleep(1000);
+            break;
     }
 
     return 0;
@@ -2113,23 +2243,21 @@ void networkGameLoop(void) {
     printf("\n아무 키나 누르면 메뉴로 돌아갑니다...");
     fflush(stdout);
     _getch();
-
-    /* 연결 종료 */
-    if (netSocket != INVALID_SOCK) {
-        CLOSE_SOCKET(netSocket);
-        netSocket = INVALID_SOCK;
-    }
-    net_cleanup();
 }
 
 /* 온라인 대전 메뉴 */
 void showOnlineMenu(void) {
     char serverIP[64];
+    char roomName[ROOM_NAME_LEN];
     int port = DEFAULT_PORT;
     int c;
+    int menuChoice;
+    int roomId;
+    int connected = 0;
+    int gameStarted = 0;
 
     clearScreen();
-    printf("\n======= 온라인 대전 =======\n\n");
+    printf("\n======= 멀티플레이 (온라인) =======\n\n");
 
     /* 닉네임 입력 */
     printf("닉네임을 입력하세요: ");
@@ -2141,7 +2269,6 @@ void showOnlineMenu(void) {
     printf("서버 IP를 입력하세요 (기본값: 127.0.0.1): ");
     fflush(stdout);
     if (fgets(serverIP, sizeof(serverIP), stdin) != NULL) {
-        /* 개행 제거 */
         serverIP[strcspn(serverIP, "\n")] = '\0';
         if (strlen(serverIP) == 0) {
             strcpy(serverIP, "127.0.0.1");
@@ -2150,7 +2277,7 @@ void showOnlineMenu(void) {
         strcpy(serverIP, "127.0.0.1");
     }
 
-    /* 포트 입력 (선택) */
+    /* 포트 입력 */
     printf("포트를 입력하세요 (기본값: %d): ", DEFAULT_PORT);
     fflush(stdout);
     {
@@ -2166,15 +2293,76 @@ void showOnlineMenu(void) {
         }
     }
 
-    /* 서버 연결 및 매칭 */
-    if (connectAndMatch(serverIP, port)) {
-        gameMode = 3;
-        networkGameLoop();
-    } else {
+    /* 서버 연결 */
+    if (!connectToServer(serverIP, port)) {
         printf("\n아무 키나 누르면 메뉴로 돌아갑니다...");
         fflush(stdout);
         _getch();
+        return;
     }
+    connected = 1;
+
+    /* 방 메뉴 루프 */
+    while (connected && !gameStarted) {
+        clearScreen();
+        printf("\n======= 멀티플레이 메뉴 =======\n");
+        printf("  접속: %s@%s:%d\n", player_nickname, serverIP, port);
+        printf("===============================\n\n");
+        printf("  1. 방 만들기\n");
+        printf("  2. 방 목록 (입장하기)\n");
+        printf("  0. 나가기\n");
+        printf("\n선택하세요: ");
+        fflush(stdout);
+
+        scanf("%d", &menuChoice);
+        while ((c = getchar()) != '\n' && c != EOF);
+
+        switch (menuChoice) {
+            case 1: /* 방 만들기 */
+                printf("\n방 이름을 입력하세요: ");
+                fflush(stdout);
+                scanf("%31s", roomName);
+                while ((c = getchar()) != '\n' && c != EOF);
+
+                if (createRoom(roomName)) {
+                    gameStarted = 1;
+                }
+                break;
+
+            case 2: /* 방 목록 */
+                roomId = showRoomList();
+                if (roomId > 0) {
+                    if (joinRoom(roomId)) {
+                        gameStarted = 1;
+                    }
+                } else if (roomId == -1) {
+                    /* 돌아가기 */
+                }
+                break;
+
+            case 0: /* 나가기 */
+                connected = 0;
+                break;
+
+            default:
+                printf("잘못된 선택입니다.\n");
+                Sleep(500);
+                break;
+        }
+    }
+
+    /* 게임 시작 */
+    if (gameStarted) {
+        gameMode = 3;
+        networkGameLoop();
+    }
+
+    /* 연결 종료 */
+    if (netSocket != INVALID_SOCK) {
+        CLOSE_SOCKET(netSocket);
+        netSocket = INVALID_SOCK;
+    }
+    net_cleanup();
 }
 
 int main() {
