@@ -2,10 +2,32 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include "cJSON.h" 
+#include "cJSON.h"
 #include <time.h>
-#include <conio.h>
 #include <ctype.h>
+
+#ifdef _WIN32
+    #include <conio.h>
+    #define CLEAR_COMMAND "cls"
+#else
+    #include <termios.h>
+    #include <unistd.h>
+    #define CLEAR_COMMAND "clear"
+
+    // Unix/macOS용 _getch 구현
+    static int _getch(void) {
+        struct termios oldattr, newattr;
+        int ch;
+        tcgetattr(STDIN_FILENO, &oldattr);
+        newattr = oldattr;
+        newattr.c_lflag &= ~(ICANON | ECHO);
+        tcsetattr(STDIN_FILENO, TCSANOW, &newattr);
+        ch = getchar();
+        tcsetattr(STDIN_FILENO, TCSANOW, &oldattr);
+        return ch;
+    }
+#endif
+
 #define DATA_FILE "user_data.json"
 
 typedef struct {
@@ -32,12 +54,13 @@ void update_game_result(const char* nickname, int did_win) {
     FILE* fp = NULL;
     char* buffer = NULL;
     long length = 0;
-    time_t tim=time(NULL);
-    struct tm tm = *localtime(&tim);
-    char date_str[10];
-    sprintf_s(date_str, sizeof(date_str), "%02d/%02d", tm.tm_mon + 1, tm.tm_mday);
+    time_t tim = time(NULL);
+    struct tm* tm_ptr = localtime(&tim);
+    char date_str[16];
+    snprintf(date_str, sizeof(date_str), "%02d/%02d", tm_ptr->tm_mon + 1, tm_ptr->tm_mday);
 
-    if (fopen_s(&fp, "user_data.json", "r") != 0 || fp == NULL) {
+    fp = fopen("user_data.json", "r");
+    if (fp == NULL) {
         root = cJSON_CreateArray();
     }
     else {
@@ -127,10 +150,11 @@ void update_game_result(const char* nickname, int did_win) {
 
     char* json_string = cJSON_Print(root);
 
-    fopen_s(&fp, "user_data.json", "w");
-
-    fprintf_s(fp, "%s", json_string);
-    fclose(fp);
+    fp = fopen("user_data.json", "w");
+    if (fp != NULL) {
+        fprintf(fp, "%s", json_string);
+        fclose(fp);
+    }
 
     cJSON_free(json_string);
     cJSON_Delete(root);
@@ -142,7 +166,8 @@ void print_rankings() {
     char* buffer = NULL;
     long length = 0;
 
-    if (fopen_s(&fp, "user_data.json", "r") == 0 && fp != NULL) {
+    fp = fopen("user_data.json", "r");
+    if (fp != NULL) {
         fseek(fp, 0, SEEK_END);
         length = ftell(fp);
         fseek(fp, 0, SEEK_SET);
@@ -184,21 +209,23 @@ void print_rankings() {
         cJSON* wins = cJSON_GetObjectItem(item, "wins");
         cJSON* losses = cJSON_GetObjectItem(item, "losses");
         cJSON* rate = cJSON_GetObjectItem(item, "win_rate");
-        cJSON* time = cJSON_GetObjectItem(item, "time");
+        cJSON* ptime = cJSON_GetObjectItem(item, "time");
 
 
-        if (name && wins && losses && rate && time) {
-            strcpy_s(players[i].nickname, sizeof(players[i].nickname), name->valuestring);
+        if (name && wins && losses && rate && ptime) {
+            strncpy(players[i].nickname, name->valuestring, sizeof(players[i].nickname) - 1);
+            players[i].nickname[sizeof(players[i].nickname) - 1] = '\0';
             players[i].wins = wins->valueint;
             players[i].losses = losses->valueint;
             players[i].win_rate = rate->valuedouble;
-            strcpy_s(players[i].time, sizeof(players[i].time), time->valuestring);
+            strncpy(players[i].time, ptime->valuestring, sizeof(players[i].time) - 1);
+            players[i].time[sizeof(players[i].time) - 1] = '\0';
         }
     }
 
     qsort(players, size, sizeof(RankPlayer), compare_players);
-    
-    system("cls");
+
+    system(CLEAR_COMMAND);
     printf("\n====== 랭킹 (상위 5명) ======\n");
     printf("%-5s %-15s %-10s %-10s %-10s\n", "순위", "닉네임", "승률", "전적", "마지막 플레이");
     printf("------------------------------------------------------------\n");
