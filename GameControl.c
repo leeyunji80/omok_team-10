@@ -1822,7 +1822,6 @@ int main() {
     initBoard();
     initAI();
 
-<<<<<<< HEAD
     printf("\n=========시작화면=======\n");
     printf("1. 1인용 게임 \n");
     printf("2. 2인용 게임 \n");
@@ -1832,13 +1831,12 @@ int main() {
     printf("============================\n");
     printf("메뉴 번호를 입력하세요. (1~5): ");
     scanf("%d", &gameMode);
-=======
+    
     while (running) {
         showMainMenu();
         scanf("%d", &gameMode);
         /* 입력 버퍼 비우기 */
         while ((c = getchar()) != '\n' && c != EOF);
->>>>>>> 9e200eac71e69c0f84944c26bb9be0dfd02b3470
 
         switch (gameMode) {
             case 1:  /* 1인용 게임 */
