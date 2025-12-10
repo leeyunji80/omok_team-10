@@ -1860,16 +1860,6 @@ int main() {
     srand((unsigned int)time(NULL));
     initBoard();
     initAI();
-
-    printf("\n=========시작화면=======\n");
-    printf("1. 1인용 게임 \n");
-    printf("2. 2인용 게임 \n");
-    printf("3. 게임 불러오기 \n");
-    printf("4. 랭킹 확인하기\n");
-    printf("5. 종료\n");
-    printf("============================\n");
-    printf("메뉴 번호를 입력하세요. (1~5): ");
-    scanf("%d", &gameMode);
     
     while (running) {
         showMainMenu();
