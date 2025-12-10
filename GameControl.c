@@ -6,6 +6,7 @@
 #include <string.h>
 #include "cJSON.h"
 #include "minimax.h"
+#include "network.h"
 
 #ifdef _WIN32
     #include <conio.h>
@@ -85,14 +86,21 @@
 int board[SIZE][SIZE];
 int cursorX = 0, cursorY = 0;
 int currentPlayer = BLACK;
-int gameMode = 0; // 1=1인용, 2=2인용
-int difficulty = MEDIUM; // AI 난이도 (기본: 중간)
+int gameMode = 0; /* 1=1인용, 2=2인용, 3=온라인 */
+int difficulty = MEDIUM; /* AI 난이도 (기본: 중간) */
 int lastMoveX = -1, lastMoveY = -1;
 char player_nickname[50] = "Player";
-char player1_nickname[50] = "Player1";  // 2인용 흑돌 플레이어
-char player2_nickname[50] = "Player2";  // 2인용 백돌 플레이어
+char player1_nickname[50] = "Player1";  /* 2인용 흑돌 플레이어 */
+char player2_nickname[50] = "Player2";  /* 2인용 백돌 플레이어 */
 DWORD lastTick = 0;
 int gameEndedByVictory = 0;
+
+/*==========네트워크 관련 전역 변수=============*/
+static SOCKET_TYPE netSocket = INVALID_SOCK;
+static int myColor = 0;           /* 내 돌 색상 (1=흑, 2=백) */
+static int isMyTurn = 0;          /* 내 턴 여부 */
+static char opponentNickname[50] = "";  /* 상대방 닉네임 */
+static int networkGameOver = 0;   /* 네트워크 게임 종료 여부 */
 
 /*============= AI 관련 =====================*/
 static const int DX[] = { 1, 0, 1, 1 };
@@ -120,55 +128,6 @@ typedef struct {
 } ScoredMove;
 
 // AI 초기화
-void initAI(void) {
-    if (initialized) return;
-
-    srand((unsigned int)time(NULL));
-
-    // 위치 가중치 초기화 (중앙이 높음)
-    int center = BOARD_SIZE / 2;
-    for (int i = 0; i < BOARD_SIZE; i++) {
-        for (int j = 0; j < BOARD_SIZE; j++) {
-            int dist = abs(i - center) + abs(j - center);
-            positionWeight[i][j] = (BOARD_SIZE - dist);
-        }
-    }
-
-    initialized = 1;
-}
-
-void cleanupAI(void) {
-    initialized = 0;
-}
-int checkWinBoard(int board[BOARD_SIZE][BOARD_SIZE], int row, int col, int color) {
-    if (row < 0 || row >= BOARD_SIZE || col < 0 || col >= BOARD_SIZE) return 0;
-    if (board[row][col] != color) return 0;
-
-    for (int dir = 0; dir < 4; dir++) {
-        int count = 1;
-
-        // 정방향
-        int nx = col + DX[dir];
-        int ny = row + DY[dir];
-        while (nx >= 0 && nx < BOARD_SIZE && ny >= 0 && ny < BOARD_SIZE && board[ny][nx] == color) {
-            count++;
-            nx += DX[dir];
-            ny += DY[dir];
-        }
-
-        // 역방향
-        nx = col - DX[dir];
-        ny = row - DY[dir];
-        while (nx >= 0 && nx < BOARD_SIZE && ny >= 0 && ny < BOARD_SIZE && board[ny][nx] == color) {
-            count++;
-            nx -= DX[dir];
-            ny -= DY[dir];
-        }
-
-        if (count >= 5) return 1;
-    }
-    return 0;
-}
 
 // 한 방향 라인 분석 (연속 돌 수, 열린 끝 수)
 static void analyzeLine(int board[BOARD_SIZE][BOARD_SIZE], int row, int col,
@@ -277,366 +236,12 @@ static int evaluatePosition(int board[BOARD_SIZE][BOARD_SIZE], int row, int col,
     return score;
 }
 
-// 보드 전체 평가
-int evaluateBoard(int board[BOARD_SIZE][BOARD_SIZE], int aiColor) {
-    int score = 0;
-    int opponent = (aiColor == BLACK) ? WHITE : BLACK;
-
-    for (int row = 0; row < BOARD_SIZE; row++) {
-        for (int col = 0; col < BOARD_SIZE; col++) {
-            if (board[row][col] == EMPTY) continue;
-
-            int color = board[row][col];
-            int sign = (color == aiColor) ? 1 : -1;
-
-            // 각 방향별 분석 (중복 방지: 시작점에서만)
-            for (int dir = 0; dir < 4; dir++) {
-                // 이전 칸에 같은 색 돌이 있으면 스킵 (중복 계산 방지)
-                int px = col - DX[dir];
-                int py = row - DY[dir];
-                if (px >= 0 && px < BOARD_SIZE && py >= 0 && py < BOARD_SIZE) {
-                    if (board[py][px] == color) continue;
-                }
-
-                int count, openEnds;
-                analyzeLine(board, row, col, DX[dir], DY[dir], color, &count, &openEnds);
-
-                int lineScore = 0;
-                if (count >= 5) {
-                    lineScore = SCORE_FIVE;
-                }
-                else if (count == 4) {
-                    if (openEnds == 2) lineScore = SCORE_OPEN_FOUR;
-                    else if (openEnds == 1) lineScore = SCORE_FOUR;
-                }
-                else if (count == 3) {
-                    if (openEnds == 2) lineScore = SCORE_OPEN_THREE;
-                    else if (openEnds == 1) lineScore = SCORE_THREE;
-                }
-                else if (count == 2) {
-                    if (openEnds == 2) lineScore = SCORE_OPEN_TWO;
-                    else if (openEnds == 1) lineScore = SCORE_TWO;
-                }
-
-                score += sign * lineScore;
-            }
-
-            // 위치 가중치
-            score += sign * positionWeight[row][col];
-        }
-    }
-
-    return score;
-}
-
 // 후보 수 비교 함수
 static int compareMoves(const void* a, const void* b) {
     return ((ScoredMove*)b)->score - ((ScoredMove*)a)->score;
 }
 
-// 착수 가능한 위치 찾기
-int getPossibleMoves(int board[BOARD_SIZE][BOARD_SIZE], Move moves[], int maxCount) {
-    int visited[BOARD_SIZE][BOARD_SIZE] = { 0 };
-    ScoredMove candidates[225];
-    int candidateCount = 0;
-    int hasStone = 0;
 
-    // 기존 돌 주변 2칸 이내만 탐색
-    for (int row = 0; row < BOARD_SIZE; row++) {
-        for (int col = 0; col < BOARD_SIZE; col++) {
-            if (board[row][col] != EMPTY) {
-                hasStone = 1;
-                for (int dr = -2; dr <= 2; dr++) {
-                    for (int dc = -2; dc <= 2; dc++) {
-                        int nr = row + dr;
-                        int nc = col + dc;
-                        if (nr >= 0 && nr < BOARD_SIZE && nc >= 0 && nc < BOARD_SIZE) {
-                            if (board[nr][nc] == EMPTY && !visited[nr][nc]) {
-                                visited[nr][nc] = 1;
-                                candidates[candidateCount].row = nr;
-                                candidates[candidateCount].col = nc;
-                                // 간단한 우선순위 (중앙에 가까울수록)
-                                candidates[candidateCount].score = positionWeight[nr][nc];
-                                candidateCount++;
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    // 보드가 비어있으면 중앙
-    if (!hasStone) {
-        moves[0].row = BOARD_SIZE / 2;
-        moves[0].col = BOARD_SIZE / 2;
-        return 1;
-    }
-
-    // 정렬
-    qsort(candidates, candidateCount, sizeof(ScoredMove), compareMoves);
-
-    // 최대 개수만큼 반환
-    int returnCount = (candidateCount < maxCount) ? candidateCount : maxCount;
-    for (int i = 0; i < returnCount; i++) {
-        moves[i].row = candidates[i].row;
-        moves[i].col = candidates[i].col;
-    }
-
-    return returnCount;
-}
-
-// Alpha-Beta Pruning Minimax
-MoveResult minimax(int board[BOARD_SIZE][BOARD_SIZE], int depth, int alpha, int beta,
-    int isMaximizing, int aiColor) {
-    MoveResult result = { 0, -1, -1 };
-    int opponent = (aiColor == BLACK) ? WHITE : BLACK;
-    int currentColor = isMaximizing ? aiColor : opponent;
-
-    // 기저 조건: 깊이 0
-    if (depth == 0) {
-        result.score = evaluateBoard(board, aiColor);
-        return result;
-    }
-
-    // 후보 수 가져오기
-    Move moves[MAX_MOVES];
-    int moveCount = getPossibleMoves(board, moves, MAX_MOVES);
-
-    if (moveCount == 0) {
-        result.score = evaluateBoard(board, aiColor);
-        return result;
-    }
-
-    // 후보 수 점수 매기기 및 정렬 (move ordering)
-    ScoredMove scoredMoves[MAX_MOVES];
-    for (int i = 0; i < moveCount; i++) {
-        scoredMoves[i].row = moves[i].row;
-        scoredMoves[i].col = moves[i].col;
-        // 공격/방어 점수 합산
-        int attackScore = evaluatePosition(board, moves[i].row, moves[i].col, currentColor);
-        int defenseScore = evaluatePosition(board, moves[i].row, moves[i].col,
-            (currentColor == BLACK) ? WHITE : BLACK);
-        scoredMoves[i].score = attackScore + defenseScore;
-    }
-    qsort(scoredMoves, moveCount, sizeof(ScoredMove), compareMoves);
-
-    // 깊이에 따라 후보 수 제한 (성능 최적화)
-    int maxMoves = moveCount;
-    if (depth <= 2) maxMoves = (moveCount < 20) ? moveCount : 20;
-    else if (depth <= 4) maxMoves = (moveCount < 15) ? moveCount : 15;
-    else maxMoves = (moveCount < 10) ? moveCount : 10;
-
-    result.row = scoredMoves[0].row;
-    result.col = scoredMoves[0].col;
-
-    if (isMaximizing) {
-        result.score = -INFINITY_SCORE;
-
-        for (int i = 0; i < maxMoves; i++) {
-            int row = scoredMoves[i].row;
-            int col = scoredMoves[i].col;
-
-            board[row][col] = aiColor;
-
-            // 승리 체크
-            if (checkWinBoard(board, row, col, aiColor)) {
-                board[row][col] = EMPTY;
-                result.score = INFINITY_SCORE - (10 - depth);  // 빠른 승리 우선
-                result.row = row;
-                result.col = col;
-                return result;
-            }
-
-            MoveResult child = minimax(board, depth - 1, alpha, beta, 0, aiColor);
-            board[row][col] = EMPTY;
-
-            if (child.score > result.score) {
-                result.score = child.score;
-                result.row = row;
-                result.col = col;
-            }
-
-            if (result.score > alpha) {
-                alpha = result.score;
-            }
-
-            if (beta <= alpha) {
-                break;  // Pruning
-            }
-        }
-    }
-    else {
-        result.score = INFINITY_SCORE;
-
-        for (int i = 0; i < maxMoves; i++) {
-            int row = scoredMoves[i].row;
-            int col = scoredMoves[i].col;
-
-            board[row][col] = opponent;
-
-            // 상대 승리 체크
-            if (checkWinBoard(board, row, col, opponent)) {
-                board[row][col] = EMPTY;
-                result.score = -INFINITY_SCORE + (10 - depth);
-                result.row = row;
-                result.col = col;
-                return result;
-            }
-
-            MoveResult child = minimax(board, depth - 1, alpha, beta, 1, aiColor);
-            board[row][col] = EMPTY;
-
-            if (child.score < result.score) {
-                result.score = child.score;
-                result.row = row;
-                result.col = col;
-            }
-
-            if (result.score < beta) {
-                beta = result.score;
-            }
-
-            if (beta <= alpha) {
-                break;  // Pruning
-            }
-        }
-    }
-
-    return result;
-}
-
-// AI 최적 착수 찾기
-Move findBestMove(int board[BOARD_SIZE][BOARD_SIZE], int aiColor, int difficulty) {
-    if (!initialized) {
-        initAI();
-    }
-
-    int opponent = (aiColor == BLACK) ? WHITE : BLACK;
-
-    // 후보 수 가져오기
-    Move moves[MAX_MOVES];
-    int moveCount = getPossibleMoves(board, moves, MAX_MOVES);
-
-    if (moveCount == 0) {
-        Move center = { BOARD_SIZE / 2, BOARD_SIZE / 2 };
-        return center;
-    }
-
-    // === 1단계: 즉시 승리 확인 ===
-    for (int i = 0; i < moveCount; i++) {
-        int score = evaluatePosition(board, moves[i].row, moves[i].col, aiColor);
-        if (score >= SCORE_FIVE) {
-            return moves[i];
-        }
-    }
-
-    // === 2단계: 상대 즉시 승리 방어 ===
-    for (int i = 0; i < moveCount; i++) {
-        int score = evaluatePosition(board, moves[i].row, moves[i].col, opponent);
-        if (score >= SCORE_FIVE) {
-            return moves[i];
-        }
-    }
-
-    // === 3단계: 승리 확정 수 (열린4, 쌍사) ===
-    for (int i = 0; i < moveCount; i++) {
-        int score = evaluatePosition(board, moves[i].row, moves[i].col, aiColor);
-        if (score >= SCORE_OPEN_FOUR) {
-            return moves[i];
-        }
-    }
-
-    // === 4단계: 상대 승리 확정 방어 ===
-    int bestDefenseIdx = -1;
-    int bestDefenseScore = 0;
-    for (int i = 0; i < moveCount; i++) {
-        int score = evaluatePosition(board, moves[i].row, moves[i].col, opponent);
-        if (score >= SCORE_OPEN_FOUR) {
-            // 열린4 방어 필수
-            return moves[i];
-        }
-        if (score > bestDefenseScore) {
-            bestDefenseScore = score;
-            bestDefenseIdx = i;
-        }
-    }
-
-    // === 5단계: 닫힌4 방어 ===
-    if (bestDefenseScore >= SCORE_FOUR) {
-        // 방어하면서 공격도 가능한지 확인
-        int defRow = moves[bestDefenseIdx].row;
-        int defCol = moves[bestDefenseIdx].col;
-        int defAttackScore = evaluatePosition(board, defRow, defCol, aiColor);
-
-        // 더 좋은 공격 수가 있는지 확인
-        for (int i = 0; i < moveCount; i++) {
-            int attackScore = evaluatePosition(board, moves[i].row, moves[i].col, aiColor);
-            if (attackScore >= SCORE_OPEN_FOUR) {
-                // 공격이 더 좋으면 공격 우선 (상대가 막아야 함)
-                return moves[i];
-            }
-        }
-
-        return moves[bestDefenseIdx];
-    }
-
-    // === 6단계: 공격 우선 (열린3 이상) ===
-    int bestAttackIdx = -1;
-    int bestAttackScore = 0;
-    for (int i = 0; i < moveCount; i++) {
-        int score = evaluatePosition(board, moves[i].row, moves[i].col, aiColor);
-        if (score > bestAttackScore) {
-            bestAttackScore = score;
-            bestAttackIdx = i;
-        }
-    }
-
-    // 열린3 이상이면 공격
-    if (bestAttackScore >= SCORE_OPEN_THREE && bestAttackIdx >= 0) {
-        // 단, 상대 열린3 방어가 더 급하면 방어
-        if (bestDefenseScore >= SCORE_OPEN_THREE && bestDefenseScore > bestAttackScore) {
-            return moves[bestDefenseIdx];
-        }
-        return moves[bestAttackIdx];
-    }
-
-    // 상대 열린3 방어
-    if (bestDefenseScore >= SCORE_OPEN_THREE && bestDefenseIdx >= 0) {
-        return moves[bestDefenseIdx];
-    }
-
-    // === 7단계: Minimax 탐색 ===
-    // 난이도별 깊이 설정
-    int depth;
-    switch (difficulty) {
-    case EASY:
-        depth = 2;
-        // 30% 확률로 랜덤 선택
-        if (rand() % 100 < 30) {
-            int randIdx = rand() % ((moveCount < 5) ? moveCount : 5);
-            return moves[randIdx];
-        }
-        break;
-    case MEDIUM:
-        depth = 4;
-        break;
-    case HARD:
-    default:
-        depth = 6;
-        break;
-    }
-
-    MoveResult result = minimax(board, depth, -INFINITY_SCORE, INFINITY_SCORE, 1, aiColor);
-
-    if (result.row >= 0 && result.col >= 0) {
-        Move bestMove = { result.row, result.col };
-        return bestMove;
-    }
-
-    // 예외 처리: 첫 번째 후보 반환
-    return moves[0];
-}
 
 typedef struct {
     int board[SAVE_BOARD_SIZE][SAVE_BOARD_SIZE];
@@ -802,26 +407,6 @@ void aiMove() {
     if (bestMove.row >= 0 && bestMove.col >= 0) {
         placeStone(bestMove.col, bestMove.row);
     }
-}
-
-int checkWin(int x, int y) {
-    int dx[] = { 1,0,1,1 };
-    int dy[] = { 0,1,1,-1 };
-    int player = board[y][x];
-
-    for (int dir = 0; dir < 4; dir++) {
-        int count = 1;
-        int nx = x + dx[dir], ny = y + dy[dir];
-        while (nx >= 0 && nx < SIZE && ny >= 0 && ny < SIZE && board[ny][nx] == player) {
-            count++; nx += dx[dir]; ny += dy[dir];
-        }
-        nx = x - dx[dir]; ny = y - dy[dir];
-        while (nx >= 0 && nx < SIZE && ny >= 0 && ny < SIZE && board[ny][nx] == player) {
-            count++; nx -= dx[dir]; ny -= dy[dir];
-        }
-        if (count >= 5) return player;
-    }
-    return 0;
 }
 
 // 승리 체크
@@ -1134,8 +719,7 @@ void print_rankings() {
 
     while (running) {
         /* 화면 지우기 */
-        printf("\033[2J\033[H");
-        fflush(stdout);
+        clearScreen();
 
         printf("\n=========== 랭킹 확인 ===========\n");
         printf("  1. 1인용 랭킹 (AI 대전)\n");
@@ -1155,17 +739,15 @@ void print_rankings() {
             /* 1인용: 난이도 선택 */
             diffRunning = 1;
             while (diffRunning) {
-                printf("\033[2J\033[H");
-                fflush(stdout);
+                clearScreen();
 
                 printf("\n======= 1인용 랭킹 - 난이도 선택 =======\n");
                 printf("  1. 쉬움 (Easy)\n");
                 printf("  2. 보통 (Medium)\n");
                 printf("  3. 어려움 (Hard)\n");
-                printf("  4. 전체 보기\n");
                 printf("  0. 뒤로 가기\n");
                 printf("========================================\n");
-                printf("선택하세요 (0~4): ");
+                printf("선택하세요 (0~3): ");
                 fflush(stdout);
 
                 scanf("%d", &diffChoice);
@@ -1175,33 +757,15 @@ void print_rankings() {
                     diffRunning = 0;
                 }
                 else if (diffChoice >= 1 && diffChoice <= 3) {
-                    printf("\033[2J\033[H");
-                    fflush(stdout);
+                    clearScreen();
                     /* 메뉴 선택 1,2,3 -> 실제 난이도 값 0,1,2 (EASY, MEDIUM, HARD) */
                     print_rankings_filtered(1, diffChoice - 1);
-                }
-                else if (diffChoice == 4) {
-                    /* 전체 보기: 순차적으로 각 난이도 확인 */
-                    printf("\033[2J\033[H");
-                    fflush(stdout);
-                    printf("\n========== 1인용 전체 랭킹 ==========\n");
-                    printf("쉬움 -> 보통 -> 어려움 순으로 확인합니다.\n\n");
-                    printf("아무 키나 누르면 [쉬움] 랭킹을 확인합니다...");
-                    fflush(stdout);
-                    _getch();
-
-                    print_rankings_filtered(1, 0);
-
-                    print_rankings_filtered(1, 1);
-
-                    print_rankings_filtered(1, 2);
                 }
             }
         }
         else if (modeChoice == 2) {
             /* 2인용 랭킹 */
-            printf("\033[2J\033[H");
-            fflush(stdout);
+            clearScreen();
             print_rankings_filtered(2, 0);
         }
     }
@@ -1819,17 +1383,18 @@ if (gameMode == 2) {
     hideCursor(0);
 }
 
-// 메뉴 화면 출력 함수
+/* 메뉴 화면 출력 함수 */
 void showMainMenu() {
     clearScreen();
     printf("\n=========== 오목 게임 ===========\n");
     printf("  1. 1인용 게임 (vs AI)\n");
-    printf("  2. 2인용 게임 (vs 플레이어)\n");
-    printf("  3. 게임 불러오기\n");
-    printf("  4. 랭킹 확인하기 (1인용)\n");
-    printf("  5. 종료\n");
+    printf("  2. 2인용 게임 (로컬)\n");
+    printf("  3. 멀티플레이 (온라인)\n");
+    printf("  4. 게임 불러오기\n");
+    printf("  5. 랭킹 확인하기\n");
+    printf("  6. 종료\n");
     printf("==================================\n");
-    printf("메뉴 번호를 입력하세요 (1~5): ");
+    printf("메뉴 번호를 입력하세요 (1~6): ");
 }
 
 // 난이도 선택 함수
@@ -1851,6 +1416,571 @@ int selectDifficulty() {
     }
 }
 
+/*==========네트워크 게임 관련 함수=============*/
+
+/* 서버 연결 */
+int connectToServer(const char* serverIP, int port) {
+    NetMessage msg;
+    NetMessage response;
+
+    printf("\n서버에 연결 중... (%s:%d)\n", serverIP, port);
+
+    /* 네트워크 초기화 */
+    if (net_init() != 0) {
+        printf("네트워크 초기화 실패\n");
+        return 0;
+    }
+
+    /* 서버 연결 */
+    netSocket = net_connect_to_server(serverIP, port);
+    if (netSocket == INVALID_SOCK) {
+        printf("서버 연결 실패!\n");
+        printf("서버가 실행 중인지 확인하세요.\n");
+        net_cleanup();
+        return 0;
+    }
+
+    printf("서버에 연결되었습니다!\n");
+
+    /* 접속 메시지 전송 */
+    net_create_connect_msg(&msg, player_nickname);
+    if (net_send_message(netSocket, &msg) != 0) {
+        printf("접속 메시지 전송 실패\n");
+        CLOSE_SOCKET(netSocket);
+        net_cleanup();
+        return 0;
+    }
+
+    /* 접속 확인 응답 대기 */
+    if (net_recv_message(netSocket, &response) != 0) {
+        printf("서버 응답 수신 실패\n");
+        CLOSE_SOCKET(netSocket);
+        net_cleanup();
+        return 0;
+    }
+
+    if (response.type != MSG_CONNECT_ACK) {
+        printf("서버 접속 실패: %s\n", response.message);
+        CLOSE_SOCKET(netSocket);
+        net_cleanup();
+        return 0;
+    }
+
+    printf("%s\n\n", response.message);
+    return 1;
+}
+
+/* 방 생성 */
+int createRoom(const char* roomName) {
+    NetMessage msg;
+    NetMessage response;
+    int waiting = 1;
+
+    memset(&msg, 0, sizeof(msg));
+    msg.type = MSG_ROOM_CREATE;
+    strncpy(msg.nickname, roomName, sizeof(msg.nickname) - 1);
+
+    if (net_send_message(netSocket, &msg) != 0) {
+        printf("방 생성 요청 실패\n");
+        return 0;
+    }
+
+    /* 응답 대기 */
+    if (net_recv_message(netSocket, &response) != 0) {
+        printf("서버 응답 실패\n");
+        return 0;
+    }
+
+    if (response.type == MSG_ROOM_CREATE_ACK) {
+        printf("%s\n", response.message);
+        printf("(상대방이 입장하면 게임이 시작됩니다)\n\n");
+
+        /* 상대방 입장 대기 */
+        while (waiting) {
+            if (_kbhit()) {
+                int key = _getch();
+                if (key == 27) { /* ESC */
+                    memset(&msg, 0, sizeof(msg));
+                    msg.type = MSG_ROOM_LEAVE;
+                    net_send_message(netSocket, &msg);
+                    printf("방을 나갔습니다.\n");
+                    return 0;
+                }
+            }
+
+            if (net_recv_message_nonblock(netSocket, &response) == 0) {
+                if (response.type == MSG_GAME_START) {
+                    myColor = response.player;
+                    strncpy(opponentNickname, response.nickname, sizeof(opponentNickname) - 1);
+                    isMyTurn = (myColor == 1) ? 1 : 0;
+
+                    printf("\n========================================\n");
+                    printf("  상대방 입장!\n");
+                    printf("  상대방: %s\n", opponentNickname);
+                    printf("  내 돌: %s (%s)\n",
+                           (myColor == 1) ? "흑돌" : "백돌",
+                           (myColor == 1) ? "선공" : "후공");
+                    printf("========================================\n");
+                    printf("\n아무 키나 누르면 게임을 시작합니다...");
+                    fflush(stdout);
+                    _getch();
+                    return 1;
+                }
+            }
+            Sleep(100);
+        }
+    } else if (response.type == MSG_ERROR) {
+        printf("오류: %s\n", response.message);
+    }
+
+    return 0;
+}
+
+/* 방 목록 표시 및 선택 */
+int showRoomList(void) {
+    NetMessage msg;
+    NetMessage response;
+    int i;
+    int choice;
+    int c;
+
+    while (1) {
+        clearScreen();
+        printf("\n========== 방 목록 ==========\n\n");
+
+        /* 방 목록 요청 */
+        memset(&msg, 0, sizeof(msg));
+        msg.type = MSG_ROOM_LIST;
+        if (net_send_message(netSocket, &msg) != 0) {
+            printf("방 목록 요청 실패\n");
+            return -1;
+        }
+
+        /* 응답 대기 */
+        if (net_recv_message(netSocket, &response) != 0) {
+            printf("서버 응답 실패\n");
+            return -1;
+        }
+
+        if (response.type != MSG_ROOM_LIST_RESP) {
+            printf("잘못된 응답\n");
+            return -1;
+        }
+
+        if (response.y == 0) {
+            printf("  (대기 중인 방이 없습니다)\n\n");
+        } else {
+            printf("  번호 | 방 이름            | 방장          | 인원\n");
+            printf("  -----+--------------------+---------------+------\n");
+            for (i = 0; i < response.y; i++) {
+                printf("  %3d  | %-18s | %-13s | %d/2 %s\n",
+                       response.rooms[i].roomId,
+                       response.rooms[i].roomName,
+                       response.rooms[i].hostName,
+                       response.rooms[i].playerCount,
+                       response.rooms[i].inGame ? "(게임중)" : "");
+            }
+            printf("\n");
+        }
+
+        printf("================================\n");
+        printf("  입장할 방 번호를 입력하세요\n");
+        printf("  (0: 새로고침, -1: 돌아가기): ");
+        fflush(stdout);
+
+        scanf("%d", &choice);
+        while ((c = getchar()) != '\n' && c != EOF);
+
+        if (choice == -1) {
+            return -1;
+        } else if (choice == 0) {
+            continue; /* 새로고침 */
+        } else if (choice > 0) {
+            return choice; /* 방 ID 반환 */
+        }
+    }
+}
+
+/* 방 입장 */
+int joinRoom(int roomId) {
+    NetMessage msg;
+    NetMessage response;
+
+    memset(&msg, 0, sizeof(msg));
+    msg.type = MSG_ROOM_JOIN;
+    msg.x = roomId;
+
+    if (net_send_message(netSocket, &msg) != 0) {
+        printf("방 입장 요청 실패\n");
+        return 0;
+    }
+
+    /* 응답 대기 */
+    if (net_recv_message(netSocket, &response) != 0) {
+        printf("서버 응답 실패\n");
+        return 0;
+    }
+
+    switch (response.type) {
+        case MSG_ROOM_JOIN_ACK:
+            printf("%s\n", response.message);
+            /* 게임 시작 메시지 대기 */
+            if (net_recv_message(netSocket, &response) == 0 &&
+                response.type == MSG_GAME_START) {
+                myColor = response.player;
+                strncpy(opponentNickname, response.nickname, sizeof(opponentNickname) - 1);
+                isMyTurn = (myColor == 1) ? 1 : 0;
+
+                printf("\n========================================\n");
+                printf("  게임 시작!\n");
+                printf("  상대방: %s\n", opponentNickname);
+                printf("  내 돌: %s (%s)\n",
+                       (myColor == 1) ? "흑돌" : "백돌",
+                       (myColor == 1) ? "선공" : "후공");
+                printf("========================================\n");
+                printf("\n아무 키나 누르면 게임을 시작합니다...");
+                fflush(stdout);
+                _getch();
+                return 1;
+            }
+            break;
+
+        case MSG_ROOM_NOT_FOUND:
+            printf("방을 찾을 수 없습니다.\n");
+            Sleep(1000);
+            break;
+
+        case MSG_ROOM_FULL:
+            printf("방이 가득 찼습니다.\n");
+            Sleep(1000);
+            break;
+
+        case MSG_ERROR:
+            printf("오류: %s\n", response.message);
+            Sleep(1000);
+            break;
+
+        default:
+            printf("알 수 없는 응답\n");
+            Sleep(1000);
+            break;
+    }
+
+    return 0;
+}
+
+/* 네트워크 게임 보드 출력 */
+void printNetworkBoard(void) {
+    int x, y;
+
+    clearScreen();
+    printf("\n======= 온라인 대전 =======\n");
+    printf("나: %s (%s)  vs  상대: %s (%s)\n\n",
+           player_nickname, (myColor == 1) ? "흑" : "백",
+           opponentNickname, (myColor == 1) ? "백" : "흑");
+
+    printf("   ");
+    for (x = 1; x <= SIZE; x++)
+        printf("%2d ", x);
+    printf("\n  +");
+    for (x = 0; x < SIZE * 3; x++) printf("-");
+    printf("+\n");
+
+    for (y = 0; y < SIZE; y++) {
+        printf("%c |", 'A' + y);
+        for (x = 0; x < SIZE; x++) {
+            if (y == cursorY && x == cursorX) {
+                if (board[y][x] == BLACK) printf("[X]");
+                else if (board[y][x] == WHITE) printf("[O]");
+                else printf("[ ]");
+            }
+            else {
+                if (board[y][x] == BLACK) printf(" X ");
+                else if (board[y][x] == WHITE) printf(" O ");
+                else printf(" . ");
+            }
+        }
+        printf("|\n");
+    }
+
+    printf("  +");
+    for (x = 0; x < SIZE * 3; x++) printf("-");
+    printf("+\n");
+
+    printf("흑돌: X  백돌: O\n");
+
+    if (isMyTurn) {
+        printf("\n>> 내 턴입니다! (WASD: 이동, B: 착수)\n");
+    } else {
+        printf("\n>> 상대방 턴... 기다리는 중...\n");
+    }
+    fflush(stdout);
+}
+
+/* 네트워크 게임 루프 */
+void networkGameLoop(void) {
+    NetMessage msg;
+    NetMessage response;
+    int key;
+    int result;
+
+    networkGameOver = 0;
+    initBoard();
+    cursorX = SIZE / 2;
+    cursorY = SIZE / 2;
+
+    hideCursor(1);
+
+    while (!networkGameOver) {
+        printNetworkBoard();
+
+        if (isMyTurn) {
+            /* 내 턴: 입력 처리 */
+            if (_kbhit()) {
+                key = _getch();
+
+                switch (key) {
+                    case 'w': case 'W':
+                        if (cursorY > 0) cursorY--;
+                        break;
+                    case 's': case 'S':
+                        if (cursorY < SIZE - 1) cursorY++;
+                        break;
+                    case 'a': case 'A':
+                        if (cursorX > 0) cursorX--;
+                        break;
+                    case 'd': case 'D':
+                        if (cursorX < SIZE - 1) cursorX++;
+                        break;
+                    case 'b': case 'B':
+                        /* 착수 시도 */
+                        if (board[cursorY][cursorX] == EMPTY) {
+                            /* 서버에 착수 전송 */
+                            net_create_move_msg(&msg, cursorX, cursorY, myColor);
+                            if (net_send_message(netSocket, &msg) != 0) {
+                                printf("\n착수 전송 실패! 연결이 끊어졌을 수 있습니다.\n");
+                                networkGameOver = 1;
+                                break;
+                            }
+
+                            /* 착수 확인 대기 */
+                            if (net_recv_message(netSocket, &response) != 0) {
+                                printf("\n서버 응답 없음! 연결이 끊어졌을 수 있습니다.\n");
+                                networkGameOver = 1;
+                                break;
+                            }
+
+                            if (response.type == MSG_MOVE_ACK) {
+                                /* 착수 성공 */
+                                board[cursorY][cursorX] = myColor;
+                                lastMoveX = cursorX;
+                                lastMoveY = cursorY;
+                                isMyTurn = 0;
+                            } else if (response.type == MSG_ERROR) {
+                                printf("\n착수 실패: %s\n", response.message);
+                                Sleep(1000);
+                            } else if (response.type == MSG_GAME_END) {
+                                /* 내가 승리 */
+                                board[cursorY][cursorX] = myColor;
+                                printNetworkBoard();
+                                if (response.result == RESULT_BLACK_WIN) {
+                                    printf("\n%s 승리!\n", (myColor == 1) ? player_nickname : opponentNickname);
+                                } else if (response.result == RESULT_WHITE_WIN) {
+                                    printf("\n%s 승리!\n", (myColor == 2) ? player_nickname : opponentNickname);
+                                }
+                                networkGameOver = 1;
+                            }
+                        } else {
+                            printf("\n이미 돌이 있는 위치입니다!\n");
+                            Sleep(500);
+                        }
+                        break;
+                    case 27: /* ESC */
+                        printf("\n게임을 종료하시겠습니까? (Y/N): ");
+                        fflush(stdout);
+                        key = _getch();
+                        if (key == 'y' || key == 'Y') {
+                            memset(&msg, 0, sizeof(msg));
+                            msg.type = MSG_DISCONNECT;
+                            net_send_message(netSocket, &msg);
+                            networkGameOver = 1;
+                        }
+                        break;
+                }
+            }
+        }
+
+        /* 상대방 메시지 확인 (논블로킹) */
+        result = net_recv_message_nonblock(netSocket, &response);
+        if (result == 0) {
+            switch (response.type) {
+                case MSG_MOVE:
+                    /* 상대방 착수 */
+                    board[response.y][response.x] = response.player;
+                    lastMoveX = response.x;
+                    lastMoveY = response.y;
+                    isMyTurn = 1;
+                    break;
+
+                case MSG_GAME_END:
+                    printNetworkBoard();
+                    if (response.result == RESULT_BLACK_WIN) {
+                        printf("\n%s 승리!\n", (myColor == 1) ? player_nickname : opponentNickname);
+                    } else if (response.result == RESULT_WHITE_WIN) {
+                        printf("\n%s 승리!\n", (myColor == 2) ? player_nickname : opponentNickname);
+                    } else if (response.result == RESULT_DRAW) {
+                        printf("\n무승부입니다!\n");
+                    }
+                    networkGameOver = 1;
+                    break;
+
+                case MSG_OPPONENT_LEFT:
+                    printf("\n상대방이 게임을 나갔습니다.\n");
+                    networkGameOver = 1;
+                    break;
+
+                case MSG_ERROR:
+                    printf("\n오류: %s\n", response.message);
+                    break;
+
+                default:
+                    break;
+            }
+        } else if (result == -1) {
+            /* 연결 끊김 */
+            printf("\n서버와의 연결이 끊어졌습니다.\n");
+            networkGameOver = 1;
+        }
+
+        Sleep(50);
+    }
+
+    hideCursor(0);
+    printf("\n아무 키나 누르면 메뉴로 돌아갑니다...");
+    fflush(stdout);
+    _getch();
+}
+
+/* 온라인 대전 메뉴 */
+void showOnlineMenu(void) {
+    char serverIP[64];
+    char roomName[ROOM_NAME_LEN];
+    int port = DEFAULT_PORT;
+    int c;
+    int menuChoice;
+    int roomId;
+    int connected = 0;
+    int gameStarted = 0;
+
+    clearScreen();
+    printf("\n======= 멀티플레이 (온라인) =======\n\n");
+
+    /* 닉네임 입력 */
+    printf("닉네임을 입력하세요: ");
+    fflush(stdout);
+    scanf("%49s", player_nickname);
+    while ((c = getchar()) != '\n' && c != EOF);
+
+    /* 서버 IP 입력 */
+    printf("서버 IP를 입력하세요 (기본값: 127.0.0.1): ");
+    fflush(stdout);
+    if (fgets(serverIP, sizeof(serverIP), stdin) != NULL) {
+        serverIP[strcspn(serverIP, "\n")] = '\0';
+        if (strlen(serverIP) == 0) {
+            strcpy(serverIP, "127.0.0.1");
+        }
+    } else {
+        strcpy(serverIP, "127.0.0.1");
+    }
+
+    /* 포트 입력 */
+    printf("포트를 입력하세요 (기본값: %d): ", DEFAULT_PORT);
+    fflush(stdout);
+    {
+        char portStr[16];
+        if (fgets(portStr, sizeof(portStr), stdin) != NULL) {
+            portStr[strcspn(portStr, "\n")] = '\0';
+            if (strlen(portStr) > 0) {
+                int inputPort = atoi(portStr);
+                if (inputPort > 0 && inputPort <= 65535) {
+                    port = inputPort;
+                }
+            }
+        }
+    }
+
+    /* 서버 연결 */
+    if (!connectToServer(serverIP, port)) {
+        printf("\n아무 키나 누르면 메뉴로 돌아갑니다...");
+        fflush(stdout);
+        _getch();
+        return;
+    }
+    connected = 1;
+
+    /* 방 메뉴 루프 */
+    while (connected && !gameStarted) {
+        clearScreen();
+        printf("\n======= 멀티플레이 메뉴 =======\n");
+        printf("  접속: %s@%s:%d\n", player_nickname, serverIP, port);
+        printf("===============================\n\n");
+        printf("  1. 방 만들기\n");
+        printf("  2. 방 목록 (입장하기)\n");
+        printf("  0. 나가기\n");
+        printf("\n선택하세요: ");
+        fflush(stdout);
+
+        scanf("%d", &menuChoice);
+        while ((c = getchar()) != '\n' && c != EOF);
+
+        switch (menuChoice) {
+            case 1: /* 방 만들기 */
+                printf("\n방 이름을 입력하세요: ");
+                fflush(stdout);
+                scanf("%31s", roomName);
+                while ((c = getchar()) != '\n' && c != EOF);
+
+                if (createRoom(roomName)) {
+                    gameStarted = 1;
+                }
+                break;
+
+            case 2: /* 방 목록 */
+                roomId = showRoomList();
+                if (roomId > 0) {
+                    if (joinRoom(roomId)) {
+                        gameStarted = 1;
+                    }
+                } else if (roomId == -1) {
+                    /* 돌아가기 */
+                }
+                break;
+
+            case 0: /* 나가기 */
+                connected = 0;
+                break;
+
+            default:
+                printf("잘못된 선택입니다.\n");
+                Sleep(500);
+                break;
+        }
+    }
+
+    /* 게임 시작 */
+    if (gameStarted) {
+        gameMode = 3;
+        networkGameLoop();
+    }
+
+    /* 연결 종료 */
+    if (netSocket != INVALID_SOCK) {
+        CLOSE_SOCKET(netSocket);
+        netSocket = INVALID_SOCK;
+    }
+    net_cleanup();
+}
+
 int main() {
     int running = 1;
     int c;
@@ -1860,6 +1990,16 @@ int main() {
     srand((unsigned int)time(NULL));
     initBoard();
     initAI();
+
+    printf("\n=========시작화면=======\n");
+    printf("1. 1인용 게임 \n");
+    printf("2. 2인용 게임 \n");
+    printf("3. 게임 불러오기 \n");
+    printf("4. 랭킹 확인하기\n");
+    printf("5. 종료\n");
+    printf("============================\n");
+    printf("메뉴 번호를 입력하세요. (1~5): ");
+    scanf("%d", &gameMode);
     
     while (running) {
         showMainMenu();
@@ -1942,7 +2082,11 @@ int main() {
                 }
                 break;
 
-            case 3:  /* 게임 불러오기 */
+            case 3:  /* 온라인 대전 */
+                showOnlineMenu();
+                break;
+
+            case 4:  /* 게임 불러오기 */
                 if (LoadSelectedGame()) {
                     printf("아무 키나 누르면 게임을 시작합니다...");
                     _getch();
@@ -1963,12 +2107,12 @@ int main() {
                 /* 불러오기 실패/취소 시 자동으로 메뉴로 돌아감 */
                 break;
 
-            case 4:  /* 랭킹 확인 */
+            case 5:  /* 랭킹 확인 */
                 print_rankings();
                 /* 랭킹 확인 후 자동으로 메뉴로 돌아감 */
                 break;
 
-            case 5:  /* 종료 */
+            case 6:  /* 종료 */
                 running = 0;
                 break;
 
