@@ -782,8 +782,12 @@ void moveCursor(char key) {
 // 착수 처리
 int placeStone(int x, int y) {
     if (board[y][x] != EMPTY) {
-        printf("이미 돌이 존재합니다!\n");
-        Sleep(800);
+        COORD pos = { 0, 23 };
+SetConsoleCursorPosition(GetStdHandle(STD_OUTPUT_HANDLE), pos);
+printf("이미 돌이 존재합니다!");
+Sleep(800);
+SetConsoleCursorPosition(GetStdHandle(STD_OUTPUT_HANDLE), pos);
+printf("                       ");
         return 0;
     }
     board[y][x] = currentPlayer;
@@ -1857,6 +1861,16 @@ int main() {
     initBoard();
     initAI();
 
+    printf("\n=========시작화면=======\n");
+    printf("1. 1인용 게임 \n");
+    printf("2. 2인용 게임 \n");
+    printf("3. 게임 불러오기 \n");
+    printf("4. 랭킹 확인하기\n");
+    printf("5. 종료\n");
+    printf("============================\n");
+    printf("메뉴 번호를 입력하세요. (1~5): ");
+    scanf("%d", &gameMode);
+    
     while (running) {
         showMainMenu();
         scanf("%d", &gameMode);
