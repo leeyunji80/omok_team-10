@@ -40,8 +40,10 @@
 /* 상수 정의 */
 #define DEFAULT_PORT 9999
 #define BUFFER_SIZE 4096
-#define MAX_CLIENTS 10
+#define MAX_CLIENTS 20
+#define MAX_ROOMS 10
 #define BOARD_NET_SIZE 15
+#define ROOM_NAME_LEN 32
 
 /* 메시지 타입 */
 typedef enum {
@@ -49,10 +51,16 @@ typedef enum {
     MSG_CONNECT_ACK = 2,    /* 접속 승인 */
     MSG_DISCONNECT = 3,     /* 연결 종료 */
 
-    MSG_MATCH_REQUEST = 10, /* 매칭 요청 */
-    MSG_MATCH_CANCEL = 11,  /* 매칭 취소 */
-    MSG_MATCH_FOUND = 12,   /* 매칭 성공 */
-    MSG_WAITING = 13,       /* 매칭 대기 중 */
+    /* 방 관련 메시지 */
+    MSG_ROOM_CREATE = 10,   /* 방 생성 요청 */
+    MSG_ROOM_CREATE_ACK = 11, /* 방 생성 완료 */
+    MSG_ROOM_LIST = 12,     /* 방 목록 요청 */
+    MSG_ROOM_LIST_RESP = 13, /* 방 목록 응답 */
+    MSG_ROOM_JOIN = 14,     /* 방 입장 요청 */
+    MSG_ROOM_JOIN_ACK = 15, /* 방 입장 승인 */
+    MSG_ROOM_LEAVE = 16,    /* 방 퇴장 */
+    MSG_ROOM_FULL = 17,     /* 방 가득 참 */
+    MSG_ROOM_NOT_FOUND = 18, /* 방 없음 */
 
     MSG_GAME_START = 20,    /* 게임 시작 */
     MSG_MOVE = 21,          /* 착수 */
@@ -75,35 +83,50 @@ typedef enum {
     RESULT_DISCONNECT = 4
 } GameResult;
 
+/* 방 정보 구조체 */
+typedef struct {
+    int roomId;
+    char roomName[ROOM_NAME_LEN];
+    char hostName[50];
+    int playerCount;        /* 1 또는 2 */
+    int inGame;             /* 게임 진행 중 여부 */
+} RoomInfo;
+
 /* 네트워크 메시지 구조체 */
 typedef struct {
     int type;               /* MessageType */
-    int x;                  /* 착수 x좌표 */
-    int y;                  /* 착수 y좌표 */
+    int x;                  /* 착수 x좌표 / roomId */
+    int y;                  /* 착수 y좌표 / roomCount */
     int player;             /* 플레이어 색상 (1=흑, 2=백) */
     int result;             /* 게임 결과 */
-    char nickname[50];      /* 닉네임 */
+    char nickname[50];      /* 닉네임 / 방 이름 */
     char message[256];      /* 추가 메시지 */
+    RoomInfo rooms[MAX_ROOMS]; /* 방 목록 (MSG_ROOM_LIST_RESP용) */
 } NetMessage;
 
 /* 클라이언트 정보 (서버용) */
 typedef struct {
     SOCKET_TYPE socket;
     char nickname[50];
+    int inRoom;             /* 방에 있는지 */
+    int roomId;             /* 속한 방 ID */
     int inGame;
     int color;              /* 1=흑, 2=백 */
     int opponentIndex;      /* 상대방 클라이언트 인덱스 */
 } ClientInfo;
 
-/* 게임 세션 (서버용) */
+/* 게임 방 (서버용) */
 typedef struct {
     int active;
-    int player1Index;
-    int player2Index;
+    int roomId;
+    char roomName[ROOM_NAME_LEN];
+    int hostIndex;          /* 방장 클라이언트 인덱스 */
+    int guestIndex;         /* 참가자 클라이언트 인덱스 */
+    int inGame;
     int board[BOARD_NET_SIZE][BOARD_NET_SIZE];
     int currentTurn;        /* 1=흑, 2=백 */
     int moveCount;
-} GameSession;
+} GameRoom;
 
 /* ========== 함수 선언 ========== */
 
