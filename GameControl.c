@@ -1177,22 +1177,19 @@ void print_rankings() {
                     print_rankings_filtered(1, diffChoice - 1);
                 }
                 else if (diffChoice == 4) {
-                    /* 전체 보기: 각 난이도별로 출력 (EASY=0, MEDIUM=1, HARD=2) */
+                    /* 전체 보기: 순차적으로 각 난이도 확인 */
                     printf("\033[2J\033[H");
                     fflush(stdout);
-                    printf("\n========== 1인용 전체 랭킹 ==========\n\n");
+                    printf("\n========== 1인용 전체 랭킹 ==========\n");
+                    printf("쉬움 -> 보통 -> 어려움 순으로 확인합니다.\n\n");
+                    printf("아무 키나 누르면 [쉬움] 랭킹을 확인합니다...");
+                    fflush(stdout);
+                    _getch();
 
-                    printf("[ 쉬움 (Easy) ]\n");
                     print_rankings_filtered(1, 0);
 
-                    printf("\033[2J\033[H");
-                    fflush(stdout);
-                    printf("[ 보통 (Medium) ]\n");
                     print_rankings_filtered(1, 1);
 
-                    printf("\033[2J\033[H");
-                    fflush(stdout);
-                    printf("[ 어려움 (Hard) ]\n");
                     print_rankings_filtered(1, 2);
                 }
             }
@@ -1612,27 +1609,37 @@ void showMenu() {
     scanf("%d", &choice);
 
     switch (choice) {
-    case 1: SaveCurrentGame(); printf("아무키나 누르면 게임으로 돌아갑니다..."); _getch(); hideCursor(1); return ;
-    case 2:   if (LoadSelectedGame()) {
+    case 1:
+        SaveCurrentGame();
+        printf("아무키나 누르면 게임으로 돌아갑니다...");
+        _getch();
         clearScreen();
         hideCursor(1);
-                return ;
-                
-            } else {
-                printf("불러오기를 실패하거나 취소했습니다. 아무 키나 누르면 메뉴로 돌아갑니다...");
-            }
-            _getch();
-            break;
-    case 3: printf("프로그램을 종료합니다...\n");
-            exit(0);
-            break;
-    default: printf("잘못된 선택입니다.\n"); Sleep(600); break;
+        return;
+    case 2:
+        if (LoadSelectedGame()) {
+            clearScreen();
+            hideCursor(1);
+            return;
+        } else {
+            printf("불러오기를 실패하거나 취소했습니다. 아무 키나 누르면 메뉴로 돌아갑니다...");
+        }
+        _getch();
+        break;
+    case 3:
+        printf("프로그램을 종료합니다...\n");
+        exit(0);
+        break;
+    default:
+        printf("잘못된 선택입니다.\n");
+        Sleep(600);
+        break;
     }
     printf("아무 키나 누르면 메뉴를 닫습니다...\n");
     _getch();
-    clearScreen();  // 메뉴 나갈 때 화면 정리
-    hideCursor(1);  // 게임 중 커서 숨기기
-  }
+    clearScreen();
+    hideCursor(1);
+}
 
 
 // 메인 게임 루프
@@ -1737,18 +1744,21 @@ if (gameMode == 2) {
                         }
                     }
                     else if(gameMode == 2){
-                        // 2인용: 게임 시작 시 입력받은 닉네임 사용
+                        /* 2인용: 게임 시작 시 입력받은 닉네임 사용 */
                         if (winner == BLACK) {
-                            // 흑돌(player1) 승리
+                            /* 흑돌(player1) 승리 */
                             printf("\n%s님 승리! %s님 패배!\n", player1_nickname, player2_nickname);
                             update_game_result(player1_nickname, 1, 2, 0);
                             update_game_result(player2_nickname, 0, 2, 0);
                         } else {
-                            // 백돌(player2) 승리
+                            /* 백돌(player2) 승리 */
                             printf("\n%s님 승리! %s님 패배!\n", player2_nickname, player1_nickname);
                             update_game_result(player2_nickname, 1, 2, 0);
                             update_game_result(player1_nickname, 0, 2, 0);
                         }
+                        printf("\n아무 키나 누르면 메뉴로 돌아갑니다...");
+                        fflush(stdout);
+                        _getch();
                     }
                     break;
                 }
