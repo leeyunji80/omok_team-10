@@ -747,8 +747,12 @@ void moveCursor(char key) {
 // 착수 처리
 int placeStone(int x, int y) {
     if (board[y][x] != EMPTY) {
-        printf("이미 돌이 존재합니다!\n");
-        Sleep(800);
+        COORD pos = { 0, 23 };
+SetConsoleCursorPosition(GetStdHandle(STD_OUTPUT_HANDLE), pos);
+printf("이미 돌이 존재합니다!");
+Sleep(800);
+SetConsoleCursorPosition(GetStdHandle(STD_OUTPUT_HANDLE), pos);
+printf("                       ");
         return 0;
     }
     board[y][x] = currentPlayer;
