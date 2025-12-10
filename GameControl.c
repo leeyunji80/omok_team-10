@@ -1138,8 +1138,7 @@ void print_rankings() {
 
     while (running) {
         /* 화면 지우기 */
-        printf("\033[2J\033[H");
-        fflush(stdout);
+        clearScreen();
 
         printf("\n=========== 랭킹 확인 ===========\n");
         printf("  1. 1인용 랭킹 (AI 대전)\n");
@@ -1159,8 +1158,7 @@ void print_rankings() {
             /* 1인용: 난이도 선택 */
             diffRunning = 1;
             while (diffRunning) {
-                printf("\033[2J\033[H");
-                fflush(stdout);
+                clearScreen();
 
                 printf("\n======= 1인용 랭킹 - 난이도 선택 =======\n");
                 printf("  1. 쉬움 (Easy)\n");
@@ -1178,8 +1176,7 @@ void print_rankings() {
                     diffRunning = 0;
                 }
                 else if (diffChoice >= 1 && diffChoice <= 3) {
-                    printf("\033[2J\033[H");
-                    fflush(stdout);
+                    clearScreen();
                     /* 메뉴 선택 1,2,3 -> 실제 난이도 값 0,1,2 (EASY, MEDIUM, HARD) */
                     print_rankings_filtered(1, diffChoice - 1);
                 }
@@ -1187,8 +1184,7 @@ void print_rankings() {
         }
         else if (modeChoice == 2) {
             /* 2인용 랭킹 */
-            printf("\033[2J\033[H");
-            fflush(stdout);
+            clearScreen();
             print_rankings_filtered(2, 0);
         }
     }
