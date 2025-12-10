@@ -2,14 +2,13 @@
 #include "network.h"
 
 /*
- * 오목 게임 매칭 서버
- * - 클라이언트 연결 관리
- * - 1:1 매칭
+ * 오목 게임 방 기반 매칭 서버
+ * - 방 생성/목록/입장 관리
  * - 게임 진행 중계
  *
  * 컴파일:
- *   Windows: cl server.c network.c cJSON.c /Fe:server.exe
- *   macOS/Linux: gcc -o server server.c network.c cJSON.c
+ *   Windows: gcc -o omok_server server.c network.c cJSON.c -lws2_32
+ *   macOS/Linux: gcc -o omok_server server.c network.c cJSON.c
  */
 
 #ifdef _WIN32
@@ -23,24 +22,34 @@
 
 /* 서버 설정 */
 #define SERVER_PORT 9999
-#define MAX_SESSIONS 5
 
 /* 전역 변수 */
 static ClientInfo clients[MAX_CLIENTS];
-static GameSession sessions[MAX_SESSIONS];
-static int waitingClientIndex = -1;  /* 매칭 대기 중인 클라이언트 */
+static GameRoom rooms[MAX_ROOMS];
+static int nextRoomId = 1;
 
 /* 함수 프로토타입 */
 void initServer(void);
 void handleNewConnection(SOCKET_TYPE serverSocket);
 void handleClientMessage(int clientIndex);
 void handleDisconnect(int clientIndex);
-void matchPlayers(int client1, int client2);
+
+/* 방 관련 함수 */
+int createRoom(int clientIndex, const char* roomName);
+void sendRoomList(int clientIndex);
+int joinRoom(int clientIndex, int roomId);
+void leaveRoom(int clientIndex);
+void startGame(int roomIndex);
+
+/* 게임 관련 함수 */
 void handleMove(int clientIndex, NetMessage* msg);
-void endGame(int sessionIndex, int winner);
-void broadcastToSession(int sessionIndex, NetMessage* msg, int excludeClient);
+void endGame(int roomIndex, int winner);
+
+/* 유틸리티 */
 int findEmptyClientSlot(void);
-int findClientSession(int clientIndex);
+int findEmptyRoomSlot(void);
+int findRoomById(int roomId);
+int findClientRoom(int clientIndex);
 void printStatus(void);
 
 /* ========== 메인 함수 ========== */
@@ -63,7 +72,7 @@ int main(int argc, char* argv[]) {
     }
 
     printf("========================================\n");
-    printf("       오목 게임 매칭 서버\n");
+    printf("       오목 게임 서버 (방 시스템)\n");
     printf("========================================\n\n");
 
     /* 네트워크 초기화 */
@@ -109,7 +118,6 @@ int main(int argc, char* argv[]) {
         activity = select(maxfd + 1, &readfds, NULL, NULL, &tv);
 
         if (activity < 0) {
-            /* select 오류 */
 #ifdef _WIN32
             if (WSAGetLastError() != WSAEINTR)
 #else
@@ -149,7 +157,7 @@ int main(int argc, char* argv[]) {
     return 0;
 }
 
-/* ========== 서버 함수 구현 ========== */
+/* ========== 서버 초기화 ========== */
 
 void initServer(void) {
     int i, j;
@@ -157,23 +165,26 @@ void initServer(void) {
     for (i = 0; i < MAX_CLIENTS; i++) {
         clients[i].socket = INVALID_SOCK;
         clients[i].nickname[0] = '\0';
+        clients[i].inRoom = 0;
+        clients[i].roomId = -1;
         clients[i].inGame = 0;
         clients[i].color = 0;
         clients[i].opponentIndex = -1;
     }
 
-    for (i = 0; i < MAX_SESSIONS; i++) {
-        sessions[i].active = 0;
-        sessions[i].player1Index = -1;
-        sessions[i].player2Index = -1;
-        sessions[i].currentTurn = 1;
-        sessions[i].moveCount = 0;
+    for (i = 0; i < MAX_ROOMS; i++) {
+        rooms[i].active = 0;
+        rooms[i].roomId = -1;
+        rooms[i].roomName[0] = '\0';
+        rooms[i].hostIndex = -1;
+        rooms[i].guestIndex = -1;
+        rooms[i].inGame = 0;
+        rooms[i].currentTurn = 1;
+        rooms[i].moveCount = 0;
         for (j = 0; j < BOARD_NET_SIZE; j++) {
-            memset(sessions[i].board[j], 0, sizeof(int) * BOARD_NET_SIZE);
+            memset(rooms[i].board[j], 0, sizeof(int) * BOARD_NET_SIZE);
         }
     }
-
-    waitingClientIndex = -1;
 }
 
 int findEmptyClientSlot(void) {
@@ -185,6 +196,39 @@ int findEmptyClientSlot(void) {
     }
     return -1;
 }
+
+int findEmptyRoomSlot(void) {
+    int i;
+    for (i = 0; i < MAX_ROOMS; i++) {
+        if (!rooms[i].active) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+int findRoomById(int roomId) {
+    int i;
+    for (i = 0; i < MAX_ROOMS; i++) {
+        if (rooms[i].active && rooms[i].roomId == roomId) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+int findClientRoom(int clientIndex) {
+    int i;
+    for (i = 0; i < MAX_ROOMS; i++) {
+        if (rooms[i].active &&
+            (rooms[i].hostIndex == clientIndex || rooms[i].guestIndex == clientIndex)) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+/* ========== 연결 처리 ========== */
 
 void handleNewConnection(SOCKET_TYPE serverSocket) {
     struct sockaddr_in clientAddr;
@@ -205,6 +249,8 @@ void handleNewConnection(SOCKET_TYPE serverSocket) {
     }
 
     clients[slotIndex].socket = clientSocket;
+    clients[slotIndex].inRoom = 0;
+    clients[slotIndex].roomId = -1;
     clients[slotIndex].inGame = 0;
     clients[slotIndex].color = 0;
     clients[slotIndex].opponentIndex = -1;
@@ -220,6 +266,7 @@ void handleClientMessage(int clientIndex) {
     NetMessage msg;
     NetMessage response;
     int result;
+    int roomIndex;
 
     result = net_recv_message(clients[clientIndex].socket, &msg);
     if (result != 0) {
@@ -238,35 +285,35 @@ void handleClientMessage(int clientIndex) {
             /* 접속 확인 응답 */
             memset(&response, 0, sizeof(response));
             response.type = MSG_CONNECT_ACK;
-            strcpy(response.message, "서버 접속 성공");
+            strcpy(response.message, "서버 접속 성공! 방을 만들거나 입장하세요.");
             net_send_message(clients[clientIndex].socket, &response);
             break;
 
-        case MSG_MATCH_REQUEST:
-            printf("[매칭] %s 매칭 요청\n", clients[clientIndex].nickname);
-
-            if (waitingClientIndex < 0) {
-                /* 대기열에 추가 */
-                waitingClientIndex = clientIndex;
-
-                memset(&response, 0, sizeof(response));
-                response.type = MSG_WAITING;
-                strcpy(response.message, "상대방을 기다리는 중...");
-                net_send_message(clients[clientIndex].socket, &response);
-
-                printf("[매칭] %s 대기 중...\n", clients[clientIndex].nickname);
-            } else if (waitingClientIndex != clientIndex) {
-                /* 매칭 성공 */
-                matchPlayers(waitingClientIndex, clientIndex);
-                waitingClientIndex = -1;
+        case MSG_ROOM_CREATE:
+            /* 방 생성 */
+            if (createRoom(clientIndex, msg.nickname) >= 0) {
+                printf("[방 생성] %s님이 '%s' 방 생성\n",
+                       clients[clientIndex].nickname, msg.nickname);
             }
             break;
 
-        case MSG_MATCH_CANCEL:
-            if (waitingClientIndex == clientIndex) {
-                waitingClientIndex = -1;
-                printf("[매칭] %s 매칭 취소\n", clients[clientIndex].nickname);
+        case MSG_ROOM_LIST:
+            /* 방 목록 요청 */
+            sendRoomList(clientIndex);
+            break;
+
+        case MSG_ROOM_JOIN:
+            /* 방 입장 (msg.x = roomId) */
+            roomIndex = joinRoom(clientIndex, msg.x);
+            if (roomIndex >= 0) {
+                printf("[방 입장] %s님이 방 #%d 입장\n",
+                       clients[clientIndex].nickname, msg.x);
             }
+            break;
+
+        case MSG_ROOM_LEAVE:
+            /* 방 퇴장 */
+            leaveRoom(clientIndex);
             break;
 
         case MSG_MOVE:
@@ -290,7 +337,7 @@ void handleClientMessage(int clientIndex) {
 }
 
 void handleDisconnect(int clientIndex) {
-    int sessionIndex;
+    int roomIndex;
     int opponentIndex;
     NetMessage msg;
 
@@ -301,15 +348,15 @@ void handleDisconnect(int clientIndex) {
     printf("[연결 해제] 클라이언트 #%d (%s)\n",
            clientIndex, clients[clientIndex].nickname);
 
-    /* 매칭 대기 중이었다면 제거 */
-    if (waitingClientIndex == clientIndex) {
-        waitingClientIndex = -1;
-    }
-
-    /* 게임 중이었다면 상대방에게 알림 */
-    if (clients[clientIndex].inGame) {
-        sessionIndex = findClientSession(clientIndex);
-        opponentIndex = clients[clientIndex].opponentIndex;
+    /* 방에 있었다면 처리 */
+    roomIndex = findClientRoom(clientIndex);
+    if (roomIndex >= 0) {
+        /* 상대방에게 알림 */
+        if (rooms[roomIndex].hostIndex == clientIndex) {
+            opponentIndex = rooms[roomIndex].guestIndex;
+        } else {
+            opponentIndex = rooms[roomIndex].hostIndex;
+        }
 
         if (opponentIndex >= 0 && clients[opponentIndex].socket != INVALID_SOCK) {
             memset(&msg, 0, sizeof(msg));
@@ -317,19 +364,24 @@ void handleDisconnect(int clientIndex) {
             strcpy(msg.message, "상대방이 연결을 종료했습니다.");
             net_send_message(clients[opponentIndex].socket, &msg);
 
+            /* 상대방 상태 초기화 */
             clients[opponentIndex].inGame = 0;
+            clients[opponentIndex].inRoom = 0;
+            clients[opponentIndex].roomId = -1;
             clients[opponentIndex].opponentIndex = -1;
         }
 
-        if (sessionIndex >= 0) {
-            sessions[sessionIndex].active = 0;
-        }
+        /* 방 삭제 */
+        rooms[roomIndex].active = 0;
+        printf("[방 삭제] 방 #%d 삭제됨\n", rooms[roomIndex].roomId);
     }
 
     /* 클라이언트 정보 초기화 */
     CLOSE_SOCKET(clients[clientIndex].socket);
     clients[clientIndex].socket = INVALID_SOCK;
     clients[clientIndex].nickname[0] = '\0';
+    clients[clientIndex].inRoom = 0;
+    clients[clientIndex].roomId = -1;
     clients[clientIndex].inGame = 0;
     clients[clientIndex].color = 0;
     clients[clientIndex].opponentIndex = -1;
@@ -337,84 +389,227 @@ void handleDisconnect(int clientIndex) {
     printStatus();
 }
 
-void matchPlayers(int client1, int client2) {
-    int sessionIndex = -1;
-    int i, j;
-    NetMessage msg1, msg2;
+/* ========== 방 관련 함수 ========== */
 
-    /* 빈 세션 찾기 */
-    for (i = 0; i < MAX_SESSIONS; i++) {
-        if (!sessions[i].active) {
-            sessionIndex = i;
-            break;
+int createRoom(int clientIndex, const char* roomName) {
+    int roomIndex;
+    NetMessage response;
+
+    roomIndex = findEmptyRoomSlot();
+    if (roomIndex < 0) {
+        memset(&response, 0, sizeof(response));
+        response.type = MSG_ERROR;
+        strcpy(response.message, "방을 더 이상 만들 수 없습니다.");
+        net_send_message(clients[clientIndex].socket, &response);
+        return -1;
+    }
+
+    /* 방 생성 */
+    rooms[roomIndex].active = 1;
+    rooms[roomIndex].roomId = nextRoomId++;
+    strncpy(rooms[roomIndex].roomName, roomName, ROOM_NAME_LEN - 1);
+    rooms[roomIndex].hostIndex = clientIndex;
+    rooms[roomIndex].guestIndex = -1;
+    rooms[roomIndex].inGame = 0;
+    rooms[roomIndex].currentTurn = 1;
+    rooms[roomIndex].moveCount = 0;
+    memset(rooms[roomIndex].board, 0, sizeof(rooms[roomIndex].board));
+
+    /* 클라이언트 상태 업데이트 */
+    clients[clientIndex].inRoom = 1;
+    clients[clientIndex].roomId = rooms[roomIndex].roomId;
+
+    /* 응답 전송 */
+    memset(&response, 0, sizeof(response));
+    response.type = MSG_ROOM_CREATE_ACK;
+    response.x = rooms[roomIndex].roomId;
+    sprintf(response.message, "방 '%s' 생성 완료! 상대방을 기다리는 중...", roomName);
+    net_send_message(clients[clientIndex].socket, &response);
+
+    printStatus();
+    return roomIndex;
+}
+
+void sendRoomList(int clientIndex) {
+    NetMessage response;
+    int i;
+    int count = 0;
+
+    memset(&response, 0, sizeof(response));
+    response.type = MSG_ROOM_LIST_RESP;
+
+    for (i = 0; i < MAX_ROOMS && count < MAX_ROOMS; i++) {
+        if (rooms[i].active) {
+            response.rooms[count].roomId = rooms[i].roomId;
+            strncpy(response.rooms[count].roomName, rooms[i].roomName, ROOM_NAME_LEN - 1);
+            strncpy(response.rooms[count].hostName,
+                    clients[rooms[i].hostIndex].nickname, 49);
+
+            /* 플레이어 수 계산 */
+            response.rooms[count].playerCount = 1;
+            if (rooms[i].guestIndex >= 0) {
+                response.rooms[count].playerCount = 2;
+            }
+            response.rooms[count].inGame = rooms[i].inGame;
+
+            count++;
         }
     }
 
-    if (sessionIndex < 0) {
-        printf("[오류] 게임 세션 부족\n");
+    response.y = count; /* 방 개수 */
+    net_send_message(clients[clientIndex].socket, &response);
+
+    printf("[방 목록] %s님에게 %d개 방 정보 전송\n",
+           clients[clientIndex].nickname, count);
+}
+
+int joinRoom(int clientIndex, int roomId) {
+    int roomIndex;
+    NetMessage response;
+    NetMessage startMsg;
+    int j;
+
+    roomIndex = findRoomById(roomId);
+    if (roomIndex < 0) {
+        memset(&response, 0, sizeof(response));
+        response.type = MSG_ROOM_NOT_FOUND;
+        strcpy(response.message, "방을 찾을 수 없습니다.");
+        net_send_message(clients[clientIndex].socket, &response);
+        return -1;
+    }
+
+    /* 이미 2명인지 확인 */
+    if (rooms[roomIndex].guestIndex >= 0) {
+        memset(&response, 0, sizeof(response));
+        response.type = MSG_ROOM_FULL;
+        strcpy(response.message, "방이 가득 찼습니다.");
+        net_send_message(clients[clientIndex].socket, &response);
+        return -1;
+    }
+
+    /* 게임 중인지 확인 */
+    if (rooms[roomIndex].inGame) {
+        memset(&response, 0, sizeof(response));
+        response.type = MSG_ERROR;
+        strcpy(response.message, "이미 게임이 진행 중인 방입니다.");
+        net_send_message(clients[clientIndex].socket, &response);
+        return -1;
+    }
+
+    /* 입장 처리 */
+    rooms[roomIndex].guestIndex = clientIndex;
+    clients[clientIndex].inRoom = 1;
+    clients[clientIndex].roomId = roomId;
+
+    /* 입장 확인 응답 */
+    memset(&response, 0, sizeof(response));
+    response.type = MSG_ROOM_JOIN_ACK;
+    response.x = roomId;
+    sprintf(response.message, "방 '%s' 입장 완료!", rooms[roomIndex].roomName);
+    net_send_message(clients[clientIndex].socket, &response);
+
+    /* 게임 시작! */
+    startGame(roomIndex);
+
+    printStatus();
+    return roomIndex;
+}
+
+void leaveRoom(int clientIndex) {
+    int roomIndex;
+    int opponentIndex;
+    NetMessage msg;
+
+    roomIndex = findClientRoom(clientIndex);
+    if (roomIndex < 0) {
         return;
     }
 
-    /* 세션 초기화 */
-    sessions[sessionIndex].active = 1;
-    sessions[sessionIndex].player1Index = client1;  /* 흑 */
-    sessions[sessionIndex].player2Index = client2;  /* 백 */
-    sessions[sessionIndex].currentTurn = 1;         /* 흑 선공 */
-    sessions[sessionIndex].moveCount = 0;
+    printf("[방 퇴장] %s님이 방 #%d 퇴장\n",
+           clients[clientIndex].nickname, rooms[roomIndex].roomId);
 
-    for (i = 0; i < BOARD_NET_SIZE; i++) {
-        for (j = 0; j < BOARD_NET_SIZE; j++) {
-            sessions[sessionIndex].board[i][j] = 0;
-        }
+    /* 상대방에게 알림 */
+    if (rooms[roomIndex].hostIndex == clientIndex) {
+        opponentIndex = rooms[roomIndex].guestIndex;
+    } else {
+        opponentIndex = rooms[roomIndex].hostIndex;
     }
 
-    /* 클라이언트 정보 업데이트 */
-    clients[client1].inGame = 1;
-    clients[client1].color = 1;  /* 흑 */
-    clients[client1].opponentIndex = client2;
+    if (opponentIndex >= 0 && clients[opponentIndex].socket != INVALID_SOCK) {
+        memset(&msg, 0, sizeof(msg));
+        msg.type = MSG_OPPONENT_LEFT;
+        strcpy(msg.message, "상대방이 방을 나갔습니다.");
+        net_send_message(clients[opponentIndex].socket, &msg);
 
-    clients[client2].inGame = 1;
-    clients[client2].color = 2;  /* 백 */
-    clients[client2].opponentIndex = client1;
+        /* 상대방 상태 초기화 */
+        clients[opponentIndex].inGame = 0;
+        clients[opponentIndex].inRoom = 0;
+        clients[opponentIndex].roomId = -1;
+        clients[opponentIndex].opponentIndex = -1;
+    }
 
-    /* 게임 시작 메시지 전송 */
-    net_create_game_start_msg(&msg1, 1, clients[client2].nickname);
-    net_create_game_start_msg(&msg2, 2, clients[client1].nickname);
+    /* 클라이언트 상태 초기화 */
+    clients[clientIndex].inRoom = 0;
+    clients[clientIndex].roomId = -1;
+    clients[clientIndex].inGame = 0;
+    clients[clientIndex].opponentIndex = -1;
 
-    net_send_message(clients[client1].socket, &msg1);
-    net_send_message(clients[client2].socket, &msg2);
-
-    printf("[게임 시작] 세션 #%d: %s(흑) vs %s(백)\n",
-           sessionIndex,
-           clients[client1].nickname,
-           clients[client2].nickname);
+    /* 방 삭제 */
+    rooms[roomIndex].active = 0;
 
     printStatus();
 }
 
-int findClientSession(int clientIndex) {
-    int i;
-    for (i = 0; i < MAX_SESSIONS; i++) {
-        if (sessions[i].active &&
-            (sessions[i].player1Index == clientIndex ||
-             sessions[i].player2Index == clientIndex)) {
-            return i;
+void startGame(int roomIndex) {
+    NetMessage msg1, msg2;
+    int hostIndex = rooms[roomIndex].hostIndex;
+    int guestIndex = rooms[roomIndex].guestIndex;
+    int i, j;
+
+    /* 보드 초기화 */
+    for (i = 0; i < BOARD_NET_SIZE; i++) {
+        for (j = 0; j < BOARD_NET_SIZE; j++) {
+            rooms[roomIndex].board[i][j] = 0;
         }
     }
-    return -1;
+    rooms[roomIndex].currentTurn = 1;
+    rooms[roomIndex].moveCount = 0;
+    rooms[roomIndex].inGame = 1;
+
+    /* 플레이어 상태 설정 */
+    clients[hostIndex].inGame = 1;
+    clients[hostIndex].color = 1;  /* 방장이 흑 (선공) */
+    clients[hostIndex].opponentIndex = guestIndex;
+
+    clients[guestIndex].inGame = 1;
+    clients[guestIndex].color = 2;  /* 참가자가 백 (후공) */
+    clients[guestIndex].opponentIndex = hostIndex;
+
+    /* 게임 시작 메시지 전송 */
+    net_create_game_start_msg(&msg1, 1, clients[guestIndex].nickname);
+    net_create_game_start_msg(&msg2, 2, clients[hostIndex].nickname);
+
+    net_send_message(clients[hostIndex].socket, &msg1);
+    net_send_message(clients[guestIndex].socket, &msg2);
+
+    printf("[게임 시작] 방 #%d: %s(흑) vs %s(백)\n",
+           rooms[roomIndex].roomId,
+           clients[hostIndex].nickname,
+           clients[guestIndex].nickname);
 }
 
+/* ========== 게임 관련 함수 ========== */
+
 void handleMove(int clientIndex, NetMessage* msg) {
-    int sessionIndex;
+    int roomIndex;
     int x, y;
     int playerColor;
     int opponentIndex;
     NetMessage response;
     NetMessage moveMsg;
 
-    sessionIndex = findClientSession(clientIndex);
-    if (sessionIndex < 0) {
-        printf("[오류] 세션을 찾을 수 없음: 클라이언트 #%d\n", clientIndex);
+    roomIndex = findClientRoom(clientIndex);
+    if (roomIndex < 0 || !rooms[roomIndex].inGame) {
         return;
     }
 
@@ -424,7 +619,7 @@ void handleMove(int clientIndex, NetMessage* msg) {
     y = msg->y;
 
     /* 턴 확인 */
-    if (sessions[sessionIndex].currentTurn != playerColor) {
+    if (rooms[roomIndex].currentTurn != playerColor) {
         memset(&response, 0, sizeof(response));
         response.type = MSG_ERROR;
         strcpy(response.message, "상대방 턴입니다.");
@@ -441,7 +636,7 @@ void handleMove(int clientIndex, NetMessage* msg) {
         return;
     }
 
-    if (sessions[sessionIndex].board[y][x] != 0) {
+    if (rooms[roomIndex].board[y][x] != 0) {
         memset(&response, 0, sizeof(response));
         response.type = MSG_ERROR;
         strcpy(response.message, "이미 돌이 있는 위치입니다.");
@@ -450,11 +645,11 @@ void handleMove(int clientIndex, NetMessage* msg) {
     }
 
     /* 착수 */
-    sessions[sessionIndex].board[y][x] = playerColor;
-    sessions[sessionIndex].moveCount++;
+    rooms[roomIndex].board[y][x] = playerColor;
+    rooms[roomIndex].moveCount++;
 
-    printf("[착수] 세션 #%d: %s (%d, %d)\n",
-           sessionIndex, clients[clientIndex].nickname, x, y);
+    printf("[착수] 방 #%d: %s (%d, %d)\n",
+           rooms[roomIndex].roomId, clients[clientIndex].nickname, x, y);
 
     /* 착수 확인 응답 */
     memset(&response, 0, sizeof(response));
@@ -469,28 +664,28 @@ void handleMove(int clientIndex, NetMessage* msg) {
     net_send_message(clients[opponentIndex].socket, &moveMsg);
 
     /* 승리 체크 */
-    if (net_check_win(sessions[sessionIndex].board, x, y, playerColor)) {
-        printf("[게임 종료] 세션 #%d: %s 승리!\n",
-               sessionIndex, clients[clientIndex].nickname);
-        endGame(sessionIndex, playerColor);
+    if (net_check_win(rooms[roomIndex].board, x, y, playerColor)) {
+        printf("[게임 종료] 방 #%d: %s 승리!\n",
+               rooms[roomIndex].roomId, clients[clientIndex].nickname);
+        endGame(roomIndex, playerColor);
         return;
     }
 
-    /* 무승부 체크 (보드가 가득 찬 경우) */
-    if (sessions[sessionIndex].moveCount >= BOARD_NET_SIZE * BOARD_NET_SIZE) {
-        printf("[게임 종료] 세션 #%d: 무승부\n", sessionIndex);
-        endGame(sessionIndex, 0);
+    /* 무승부 체크 */
+    if (rooms[roomIndex].moveCount >= BOARD_NET_SIZE * BOARD_NET_SIZE) {
+        printf("[게임 종료] 방 #%d: 무승부\n", rooms[roomIndex].roomId);
+        endGame(roomIndex, 0);
         return;
     }
 
     /* 턴 변경 */
-    sessions[sessionIndex].currentTurn = (playerColor == 1) ? 2 : 1;
+    rooms[roomIndex].currentTurn = (playerColor == 1) ? 2 : 1;
 }
 
-void endGame(int sessionIndex, int winner) {
+void endGame(int roomIndex, int winner) {
     NetMessage msg;
-    int player1 = sessions[sessionIndex].player1Index;
-    int player2 = sessions[sessionIndex].player2Index;
+    int hostIndex = rooms[roomIndex].hostIndex;
+    int guestIndex = rooms[roomIndex].guestIndex;
     int result;
 
     if (winner == 1) {
@@ -504,46 +699,50 @@ void endGame(int sessionIndex, int winner) {
     /* 게임 종료 메시지 전송 */
     net_create_game_end_msg(&msg, result);
 
-    if (clients[player1].socket != INVALID_SOCK) {
-        net_send_message(clients[player1].socket, &msg);
-        clients[player1].inGame = 0;
-        clients[player1].opponentIndex = -1;
+    if (hostIndex >= 0 && clients[hostIndex].socket != INVALID_SOCK) {
+        net_send_message(clients[hostIndex].socket, &msg);
+        clients[hostIndex].inGame = 0;
+        clients[hostIndex].inRoom = 0;
+        clients[hostIndex].roomId = -1;
+        clients[hostIndex].opponentIndex = -1;
     }
 
-    if (clients[player2].socket != INVALID_SOCK) {
-        net_send_message(clients[player2].socket, &msg);
-        clients[player2].inGame = 0;
-        clients[player2].opponentIndex = -1;
+    if (guestIndex >= 0 && clients[guestIndex].socket != INVALID_SOCK) {
+        net_send_message(clients[guestIndex].socket, &msg);
+        clients[guestIndex].inGame = 0;
+        clients[guestIndex].inRoom = 0;
+        clients[guestIndex].roomId = -1;
+        clients[guestIndex].opponentIndex = -1;
     }
 
-    /* 세션 초기화 */
-    sessions[sessionIndex].active = 0;
+    /* 방 삭제 */
+    rooms[roomIndex].active = 0;
+    printf("[방 삭제] 방 #%d 게임 종료로 삭제\n", rooms[roomIndex].roomId);
 
     printStatus();
 }
 
 void printStatus(void) {
     int connectedCount = 0;
-    int inGameCount = 0;
-    int activeSessionCount = 0;
+    int inRoomCount = 0;
+    int activeRoomCount = 0;
     int i;
 
     for (i = 0; i < MAX_CLIENTS; i++) {
         if (clients[i].socket != INVALID_SOCK) {
             connectedCount++;
-            if (clients[i].inGame) {
-                inGameCount++;
+            if (clients[i].inRoom) {
+                inRoomCount++;
             }
         }
     }
 
-    for (i = 0; i < MAX_SESSIONS; i++) {
-        if (sessions[i].active) {
-            activeSessionCount++;
+    for (i = 0; i < MAX_ROOMS; i++) {
+        if (rooms[i].active) {
+            activeRoomCount++;
         }
     }
 
-    printf("[상태] 접속: %d명, 게임 중: %d명, 활성 세션: %d개, 대기: %s\n",
-           connectedCount, inGameCount, activeSessionCount,
-           (waitingClientIndex >= 0) ? clients[waitingClientIndex].nickname : "없음");
+    printf("[상태] 접속: %d명, 방 안: %d명, 활성 방: %d개\n",
+           connectedCount, inRoomCount, activeRoomCount);
 }
