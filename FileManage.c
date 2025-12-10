@@ -2,22 +2,65 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include "cJSON.h" 
+#include "cJSON.h"
 #include <time.h>
-#include <conio.h>
 #include <ctype.h>
+
+#ifdef _WIN32
+    #include <conio.h>
+    #define CLEAR_COMMAND "cls"
+#else
+    #include <termios.h>
+    #include <unistd.h>
+    #define CLEAR_COMMAND "clear"
+
+    // Unix/macOS용 _getch 구현
+    static int _getch(void) {
+        struct termios oldattr, newattr;
+        int ch;
+        tcgetattr(STDIN_FILENO, &oldattr);
+        newattr = oldattr;
+        newattr.c_lflag &= ~(ICANON | ECHO);
+        tcsetattr(STDIN_FILENO, TCSANOW, &newattr);
+        ch = getchar();
+        tcsetattr(STDIN_FILENO, TCSANOW, &oldattr);
+        return ch;
+    }
+#endif
+
+#define DATA_FILE "user_data.json"
+
+typedef struct {
+    char nickname[50];
+    int wins;
+    int losses;
+    double win_rate;
+    char time[20];
+} RankPlayer;
+
+int compare_players(const void* a, const void* b) {
+    RankPlayer* p1 = (RankPlayer*)a;
+    RankPlayer* p2 = (RankPlayer*)b;
+
+    if (p1->win_rate < p2->win_rate) return 1;
+    if (p1->win_rate > p2->win_rate) return -1;
+    if (p1->wins < p2->wins) return 1;
+    if (p1->wins > p2->wins) return -1;
+    return 0;
+}
 
 void update_game_result(const char* nickname, int did_win) {
     cJSON* root = NULL;
     FILE* fp = NULL;
     char* buffer = NULL;
     long length = 0;
-    time_t tim=time(NULL);
-    struct tm tm = *localtime(&tim);
-    char date_str[10];
-    sprintf_s(date_str, sizeof(date_str), "%02d/%02d", tm.tm_mon + 1, tm.tm_mday);
+    time_t tim = time(NULL);
+    struct tm* tm_ptr = localtime(&tim);
+    char date_str[16];
+    snprintf(date_str, sizeof(date_str), "%02d/%02d", tm_ptr->tm_mon + 1, tm_ptr->tm_mday);
 
-    if (fopen_s(&fp, "user_data.json", "r") != 0 || fp == NULL) {
+    fp = fopen("user_data.json", "r");
+    if (fp == NULL) {
         root = cJSON_CreateArray();
     }
     else {
@@ -107,29 +150,24 @@ void update_game_result(const char* nickname, int did_win) {
 
     char* json_string = cJSON_Print(root);
 
-    fopen_s(&fp, "user_data.json", "w");
-
-    fprintf_s(fp, "%s", json_string);
-    fclose(fp);
+    fp = fopen("user_data.json", "w");
+    if (fp != NULL) {
+        fprintf(fp, "%s", json_string);
+        fclose(fp);
+    }
 
     cJSON_free(json_string);
     cJSON_Delete(root);
 }
 
 void print_rankings() {
-    typedef struct {
-        char nickname[50];
-        int wins;
-        int losses;
-        double win_rate;
-        char time[6];
-    } RankPlayer;
 
     FILE* fp = NULL;
     char* buffer = NULL;
     long length = 0;
 
-    if (fopen_s(&fp, "user_data.json", "r") == 0 && fp != NULL) {
+    fp = fopen("user_data.json", "r");
+    if (fp != NULL) {
         fseek(fp, 0, SEEK_END);
         length = ftell(fp);
         fseek(fp, 0, SEEK_SET);
@@ -171,40 +209,23 @@ void print_rankings() {
         cJSON* wins = cJSON_GetObjectItem(item, "wins");
         cJSON* losses = cJSON_GetObjectItem(item, "losses");
         cJSON* rate = cJSON_GetObjectItem(item, "win_rate");
-        cJSON* time = cJSON_GetObjectItem(item, "time");
+        cJSON* ptime = cJSON_GetObjectItem(item, "time");
 
 
-        if (name && wins && losses && rate && time) {
-            strcpy_s(players[i].nickname, sizeof(players[i].nickname), name->valuestring);
+        if (name && wins && losses && rate && ptime) {
+            strncpy(players[i].nickname, name->valuestring, sizeof(players[i].nickname) - 1);
+            players[i].nickname[sizeof(players[i].nickname) - 1] = '\0';
             players[i].wins = wins->valueint;
             players[i].losses = losses->valueint;
             players[i].win_rate = rate->valuedouble;
-            strcpy_s(players[i].time, sizeof(players[i].time), time->valuestring);
+            strncpy(players[i].time, ptime->valuestring, sizeof(players[i].time) - 1);
+            players[i].time[sizeof(players[i].time) - 1] = '\0';
         }
     }
 
-    for (int i = 0; i < size - 1; i++) {
-        for (int j = 0; j < size - 1 - i; j++) {
-            int swap_needed = 0;
+    qsort(players, size, sizeof(RankPlayer), compare_players);
 
-            if (players[j].win_rate < players[j + 1].win_rate) {
-                swap_needed = 1;
-            }
-            else if (players[j].win_rate == players[j + 1].win_rate) {
-                if (players[j].wins < players[j + 1].wins) {
-                    swap_needed = 1;
-                }
-            }
-
-            if (swap_needed) {
-                RankPlayer temp = players[j];
-                players[j] = players[j + 1];
-                players[j + 1] = temp;
-            }
-        }
-    }
-    
-    system("cls");
+    system(CLEAR_COMMAND);
     printf("\n====== 랭킹 (상위 5명) ======\n");
     printf("%-5s %-15s %-10s %-10s %-10s\n", "순위", "닉네임", "승률", "전적", "마지막 플레이");
     printf("------------------------------------------------------------\n");
@@ -227,134 +248,4 @@ void print_rankings() {
 }
 
 
-#define SAVE_BOARD_SIZE 15
-#define MAX_SAVE_SLOTS 5
-
-typedef struct {
-    int board[SAVE_BOARD_SIZE][SAVE_BOARD_SIZE];
-    int currentTurn;
-    int gameMode;
-} SaveData;
-
-void get_filename(char* buffer) {
-    time_t t = time(NULL);
-    struct tm tm = *localtime(&t);
-    sprintf(buffer, "%04d년%02d월%02d일_%02d시%02d분%02d초.dat",
-        tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday,
-        tm.tm_hour, tm.tm_min, tm.tm_sec);
-}
-
-void manage_fifo(const char* newFilename) {
-    char fileList[MAX_SAVE_SLOTS + 1][256];
-    int count = 0;
-    FILE* fp;
-
-    fp = fopen("save_list.txt", "r");
-    if (fp != NULL) {
-        while (count < MAX_SAVE_SLOTS && fscanf(fp, "%s", fileList[count]) != EOF) {
-            count++;
-        }
-        fclose(fp);
-    }
-
-    if (count >= MAX_SAVE_SLOTS) {
-        remove(fileList[0]);
-        for (int i = 0; i < count - 1; i++) {
-            strcpy(fileList[i], fileList[i + 1]);
-        }
-        count--;
-    }
-
-    strcpy(fileList[count], newFilename);
-    count++;
-
-    fp = fopen("save_list.txt", "w");
-    if (fp != NULL) {
-        for (int i = 0; i < count; i++) {
-            fprintf(fp, "%s\n", fileList[i]);
-        }
-        fclose(fp);
-    }
-}
-
-void SaveGame(const SaveData* data) {
-    char filename[256];
-    get_filename(filename);
-
-    FILE* fp = fopen(filename, "wb");
-    if (fp == NULL) {
-        return;
-    }
-    fwrite(data, sizeof(SaveData), 1, fp);
-    fclose(fp);
-
-    manage_fifo(filename);
-}
-
-int LoadGame(SaveData* data) {
-    char fileList[MAX_SAVE_SLOTS][256];
-    int count = 0;
-    FILE* fp;
-
-    fp = fopen("save_list.txt", "r");
-    if (fp == NULL) {
-        return 0;
-    }
-
-    while (count < MAX_SAVE_SLOTS && fscanf(fp, "%s", fileList[count]) != EOF) {
-        printf("%d. %s\n", count + 1, fileList[count]);
-        count++;
-    }
-    fclose(fp);
-
-    if (count == 0) return 0;
-
-    int choice;
-    scanf("%d", &choice);
-
-    if (choice < 1 || choice > count) return 0;
-
-    char* targetFile = fileList[choice - 1];
-    fp = fopen(targetFile, "rb");
-    if (fp == NULL) {
-        return 0;
-    }
-
-    fread(data, sizeof(SaveData), 1, fp);
-    fclose(fp);
-
-    return 1;
-}
-
-void HandleExit(const SaveData* currentData) {
-    char key;
-
-    printf("\n  ========================================\n");
-    printf("  게임을 저장하시겠습니까? (Y/N) >> ");
-    
-    while (1) {
-        key = _getch();
-        key = toupper(key);
-
-        if (key == 'Y') {
-            printf(" 예(Y)\n");
-            SaveGame(currentData);
-            exit(0);
-        }
-        else if (key == 'N') {
-            printf(" 아니오(N)\n");
-            exit(0);
-        }
-    }
-}
-
-void ResetGame(SaveData* data) {
-    for (int i = 0; i < SAVE_BOARD_SIZE; i++) {
-        for (int j = 0; j < SAVE_BOARD_SIZE; j++) {
-            data->board[i][j] = 0;
-        }
-    }
-
-    data->currentTurn = 1;
-    data->gameMode = 2;
-}
+/* 게임 저장/불러오기 함수는 GameControl.c에서 JSON 기반으로 구현됨 */
