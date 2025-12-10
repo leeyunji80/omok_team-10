@@ -1166,10 +1166,9 @@ void print_rankings() {
                 printf("  1. 쉬움 (Easy)\n");
                 printf("  2. 보통 (Medium)\n");
                 printf("  3. 어려움 (Hard)\n");
-                printf("  4. 전체 보기\n");
                 printf("  0. 뒤로 가기\n");
                 printf("========================================\n");
-                printf("선택하세요 (0~4): ");
+                printf("선택하세요 (0~3): ");
                 fflush(stdout);
 
                 scanf("%d", &diffChoice);
@@ -1183,22 +1182,6 @@ void print_rankings() {
                     fflush(stdout);
                     /* 메뉴 선택 1,2,3 -> 실제 난이도 값 0,1,2 (EASY, MEDIUM, HARD) */
                     print_rankings_filtered(1, diffChoice - 1);
-                }
-                else if (diffChoice == 4) {
-                    /* 전체 보기: 순차적으로 각 난이도 확인 */
-                    printf("\033[2J\033[H");
-                    fflush(stdout);
-                    printf("\n========== 1인용 전체 랭킹 ==========\n");
-                    printf("쉬움 -> 보통 -> 어려움 순으로 확인합니다.\n\n");
-                    printf("아무 키나 누르면 [쉬움] 랭킹을 확인합니다...");
-                    fflush(stdout);
-                    _getch();
-
-                    print_rankings_filtered(1, 0);
-
-                    print_rankings_filtered(1, 1);
-
-                    print_rankings_filtered(1, 2);
                 }
             }
         }
@@ -1790,7 +1773,7 @@ void showMainMenu() {
     printf("\n=========== 오목 게임 ===========\n");
     printf("  1. 1인용 게임 (vs AI)\n");
     printf("  2. 2인용 게임 (로컬)\n");
-    printf("  3. 온라인 대전\n");
+    printf("  3. 멀티플레이 (온라인)\n");
     printf("  4. 게임 불러오기\n");
     printf("  5. 랭킹 확인하기\n");
     printf("  6. 종료\n");
