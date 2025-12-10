@@ -6,6 +6,7 @@
 #include <string.h>
 #include "cJSON.h"
 #include "minimax.h"
+#include "network.h"
 
 #ifdef _WIN32
     #include <conio.h>
@@ -85,14 +86,21 @@
 int board[SIZE][SIZE];
 int cursorX = 0, cursorY = 0;
 int currentPlayer = BLACK;
-int gameMode = 0; // 1=1인용, 2=2인용
-int difficulty = MEDIUM; // AI 난이도 (기본: 중간)
+int gameMode = 0; /* 1=1인용, 2=2인용, 3=온라인 */
+int difficulty = MEDIUM; /* AI 난이도 (기본: 중간) */
 int lastMoveX = -1, lastMoveY = -1;
 char player_nickname[50] = "Player";
-char player1_nickname[50] = "Player1";  // 2인용 흑돌 플레이어
-char player2_nickname[50] = "Player2";  // 2인용 백돌 플레이어
+char player1_nickname[50] = "Player1";  /* 2인용 흑돌 플레이어 */
+char player2_nickname[50] = "Player2";  /* 2인용 백돌 플레이어 */
 DWORD lastTick = 0;
 int gameEndedByVictory = 0;
+
+/*==========네트워크 관련 전역 변수=============*/
+static SOCKET_TYPE netSocket = INVALID_SOCK;
+static int myColor = 0;           /* 내 돌 색상 (1=흑, 2=백) */
+static int isMyTurn = 0;          /* 내 턴 여부 */
+static char opponentNickname[50] = "";  /* 상대방 닉네임 */
+static int networkGameOver = 0;   /* 네트워크 게임 종료 여부 */
 
 /*============= AI 관련 =====================*/
 static const int DX[] = { 1, 0, 1, 1 };
@@ -1776,17 +1784,18 @@ if (gameMode == 2) {
     hideCursor(0);
 }
 
-// 메뉴 화면 출력 함수
+/* 메뉴 화면 출력 함수 */
 void showMainMenu() {
     clearScreen();
     printf("\n=========== 오목 게임 ===========\n");
     printf("  1. 1인용 게임 (vs AI)\n");
-    printf("  2. 2인용 게임 (vs 플레이어)\n");
-    printf("  3. 게임 불러오기\n");
-    printf("  4. 랭킹 확인하기 (1인용)\n");
-    printf("  5. 종료\n");
+    printf("  2. 2인용 게임 (로컬)\n");
+    printf("  3. 온라인 대전\n");
+    printf("  4. 게임 불러오기\n");
+    printf("  5. 랭킹 확인하기\n");
+    printf("  6. 종료\n");
     printf("==================================\n");
-    printf("메뉴 번호를 입력하세요 (1~5): ");
+    printf("메뉴 번호를 입력하세요 (1~6): ");
 }
 
 // 난이도 선택 함수
@@ -1805,6 +1814,383 @@ int selectDifficulty() {
         case 2: return MEDIUM;
         case 3: return HARD;
         default: return MEDIUM;
+    }
+}
+
+/*==========네트워크 게임 관련 함수=============*/
+
+/* 서버 연결 및 매칭 */
+int connectAndMatch(const char* serverIP, int port) {
+    NetMessage msg;
+    NetMessage response;
+    int waitingForMatch = 1;
+
+    printf("\n서버에 연결 중... (%s:%d)\n", serverIP, port);
+
+    /* 네트워크 초기화 */
+    if (net_init() != 0) {
+        printf("네트워크 초기화 실패\n");
+        return 0;
+    }
+
+    /* 서버 연결 */
+    netSocket = net_connect_to_server(serverIP, port);
+    if (netSocket == INVALID_SOCK) {
+        printf("서버 연결 실패!\n");
+        printf("서버가 실행 중인지 확인하세요.\n");
+        net_cleanup();
+        return 0;
+    }
+
+    printf("서버에 연결되었습니다!\n");
+
+    /* 접속 메시지 전송 */
+    net_create_connect_msg(&msg, player_nickname);
+    if (net_send_message(netSocket, &msg) != 0) {
+        printf("접속 메시지 전송 실패\n");
+        CLOSE_SOCKET(netSocket);
+        net_cleanup();
+        return 0;
+    }
+
+    /* 접속 확인 응답 대기 */
+    if (net_recv_message(netSocket, &response) != 0) {
+        printf("서버 응답 수신 실패\n");
+        CLOSE_SOCKET(netSocket);
+        net_cleanup();
+        return 0;
+    }
+
+    if (response.type != MSG_CONNECT_ACK) {
+        printf("서버 접속 실패: %s\n", response.message);
+        CLOSE_SOCKET(netSocket);
+        net_cleanup();
+        return 0;
+    }
+
+    printf("%s\n", response.message);
+
+    /* 매칭 요청 */
+    memset(&msg, 0, sizeof(msg));
+    msg.type = MSG_MATCH_REQUEST;
+    if (net_send_message(netSocket, &msg) != 0) {
+        printf("매칭 요청 실패\n");
+        CLOSE_SOCKET(netSocket);
+        net_cleanup();
+        return 0;
+    }
+
+    printf("\n상대방을 찾는 중...\n");
+    printf("(ESC를 누르면 취소)\n\n");
+
+    /* 매칭 대기 */
+    while (waitingForMatch) {
+        /* 키 입력 확인 (ESC로 취소) */
+        if (_kbhit()) {
+            int key = _getch();
+            if (key == 27) { /* ESC */
+                memset(&msg, 0, sizeof(msg));
+                msg.type = MSG_MATCH_CANCEL;
+                net_send_message(netSocket, &msg);
+                printf("매칭이 취소되었습니다.\n");
+                CLOSE_SOCKET(netSocket);
+                net_cleanup();
+                return 0;
+            }
+        }
+
+        /* 서버 메시지 확인 */
+        if (net_recv_message_nonblock(netSocket, &response) == 0) {
+            switch (response.type) {
+                case MSG_WAITING:
+                    printf("대기 중: %s\n", response.message);
+                    break;
+
+                case MSG_GAME_START:
+                    myColor = response.player;
+                    strncpy(opponentNickname, response.nickname, sizeof(opponentNickname) - 1);
+                    isMyTurn = (myColor == 1) ? 1 : 0; /* 흑이 선공 */
+
+                    printf("\n========================================\n");
+                    printf("  매칭 성공!\n");
+                    printf("  상대방: %s\n", opponentNickname);
+                    printf("  내 돌: %s (%s)\n",
+                           (myColor == 1) ? "흑돌" : "백돌",
+                           (myColor == 1) ? "선공" : "후공");
+                    printf("========================================\n");
+                    printf("\n아무 키나 누르면 게임을 시작합니다...");
+                    fflush(stdout);
+                    _getch();
+
+                    waitingForMatch = 0;
+                    return 1;
+
+                case MSG_ERROR:
+                    printf("오류: %s\n", response.message);
+                    break;
+
+                default:
+                    break;
+            }
+        }
+
+        Sleep(100);
+    }
+
+    return 0;
+}
+
+/* 네트워크 게임 보드 출력 */
+void printNetworkBoard(void) {
+    int x, y;
+
+    clearScreen();
+    printf("\n======= 온라인 대전 =======\n");
+    printf("나: %s (%s)  vs  상대: %s (%s)\n\n",
+           player_nickname, (myColor == 1) ? "흑" : "백",
+           opponentNickname, (myColor == 1) ? "백" : "흑");
+
+    printf("   ");
+    for (x = 1; x <= SIZE; x++)
+        printf("%2d ", x);
+    printf("\n  +");
+    for (x = 0; x < SIZE * 3; x++) printf("-");
+    printf("+\n");
+
+    for (y = 0; y < SIZE; y++) {
+        printf("%c |", 'A' + y);
+        for (x = 0; x < SIZE; x++) {
+            if (y == cursorY && x == cursorX) {
+                if (board[y][x] == BLACK) printf("[X]");
+                else if (board[y][x] == WHITE) printf("[O]");
+                else printf("[ ]");
+            }
+            else {
+                if (board[y][x] == BLACK) printf(" X ");
+                else if (board[y][x] == WHITE) printf(" O ");
+                else printf(" . ");
+            }
+        }
+        printf("|\n");
+    }
+
+    printf("  +");
+    for (x = 0; x < SIZE * 3; x++) printf("-");
+    printf("+\n");
+
+    printf("흑돌: X  백돌: O\n");
+
+    if (isMyTurn) {
+        printf("\n>> 내 턴입니다! (WASD: 이동, B: 착수)\n");
+    } else {
+        printf("\n>> 상대방 턴... 기다리는 중...\n");
+    }
+    fflush(stdout);
+}
+
+/* 네트워크 게임 루프 */
+void networkGameLoop(void) {
+    NetMessage msg;
+    NetMessage response;
+    int key;
+    int result;
+
+    networkGameOver = 0;
+    initBoard();
+    cursorX = SIZE / 2;
+    cursorY = SIZE / 2;
+
+    hideCursor(1);
+
+    while (!networkGameOver) {
+        printNetworkBoard();
+
+        if (isMyTurn) {
+            /* 내 턴: 입력 처리 */
+            if (_kbhit()) {
+                key = _getch();
+
+                switch (key) {
+                    case 'w': case 'W':
+                        if (cursorY > 0) cursorY--;
+                        break;
+                    case 's': case 'S':
+                        if (cursorY < SIZE - 1) cursorY++;
+                        break;
+                    case 'a': case 'A':
+                        if (cursorX > 0) cursorX--;
+                        break;
+                    case 'd': case 'D':
+                        if (cursorX < SIZE - 1) cursorX++;
+                        break;
+                    case 'b': case 'B':
+                        /* 착수 시도 */
+                        if (board[cursorY][cursorX] == EMPTY) {
+                            /* 서버에 착수 전송 */
+                            net_create_move_msg(&msg, cursorX, cursorY, myColor);
+                            if (net_send_message(netSocket, &msg) != 0) {
+                                printf("\n착수 전송 실패! 연결이 끊어졌을 수 있습니다.\n");
+                                networkGameOver = 1;
+                                break;
+                            }
+
+                            /* 착수 확인 대기 */
+                            if (net_recv_message(netSocket, &response) != 0) {
+                                printf("\n서버 응답 없음! 연결이 끊어졌을 수 있습니다.\n");
+                                networkGameOver = 1;
+                                break;
+                            }
+
+                            if (response.type == MSG_MOVE_ACK) {
+                                /* 착수 성공 */
+                                board[cursorY][cursorX] = myColor;
+                                lastMoveX = cursorX;
+                                lastMoveY = cursorY;
+                                isMyTurn = 0;
+                            } else if (response.type == MSG_ERROR) {
+                                printf("\n착수 실패: %s\n", response.message);
+                                Sleep(1000);
+                            } else if (response.type == MSG_GAME_END) {
+                                /* 내가 승리 */
+                                board[cursorY][cursorX] = myColor;
+                                printNetworkBoard();
+                                if (response.result == RESULT_BLACK_WIN) {
+                                    printf("\n%s 승리!\n", (myColor == 1) ? player_nickname : opponentNickname);
+                                } else if (response.result == RESULT_WHITE_WIN) {
+                                    printf("\n%s 승리!\n", (myColor == 2) ? player_nickname : opponentNickname);
+                                }
+                                networkGameOver = 1;
+                            }
+                        } else {
+                            printf("\n이미 돌이 있는 위치입니다!\n");
+                            Sleep(500);
+                        }
+                        break;
+                    case 27: /* ESC */
+                        printf("\n게임을 종료하시겠습니까? (Y/N): ");
+                        fflush(stdout);
+                        key = _getch();
+                        if (key == 'y' || key == 'Y') {
+                            memset(&msg, 0, sizeof(msg));
+                            msg.type = MSG_DISCONNECT;
+                            net_send_message(netSocket, &msg);
+                            networkGameOver = 1;
+                        }
+                        break;
+                }
+            }
+        }
+
+        /* 상대방 메시지 확인 (논블로킹) */
+        result = net_recv_message_nonblock(netSocket, &response);
+        if (result == 0) {
+            switch (response.type) {
+                case MSG_MOVE:
+                    /* 상대방 착수 */
+                    board[response.y][response.x] = response.player;
+                    lastMoveX = response.x;
+                    lastMoveY = response.y;
+                    isMyTurn = 1;
+                    break;
+
+                case MSG_GAME_END:
+                    printNetworkBoard();
+                    if (response.result == RESULT_BLACK_WIN) {
+                        printf("\n%s 승리!\n", (myColor == 1) ? player_nickname : opponentNickname);
+                    } else if (response.result == RESULT_WHITE_WIN) {
+                        printf("\n%s 승리!\n", (myColor == 2) ? player_nickname : opponentNickname);
+                    } else if (response.result == RESULT_DRAW) {
+                        printf("\n무승부입니다!\n");
+                    }
+                    networkGameOver = 1;
+                    break;
+
+                case MSG_OPPONENT_LEFT:
+                    printf("\n상대방이 게임을 나갔습니다.\n");
+                    networkGameOver = 1;
+                    break;
+
+                case MSG_ERROR:
+                    printf("\n오류: %s\n", response.message);
+                    break;
+
+                default:
+                    break;
+            }
+        } else if (result == -1) {
+            /* 연결 끊김 */
+            printf("\n서버와의 연결이 끊어졌습니다.\n");
+            networkGameOver = 1;
+        }
+
+        Sleep(50);
+    }
+
+    hideCursor(0);
+    printf("\n아무 키나 누르면 메뉴로 돌아갑니다...");
+    fflush(stdout);
+    _getch();
+
+    /* 연결 종료 */
+    if (netSocket != INVALID_SOCK) {
+        CLOSE_SOCKET(netSocket);
+        netSocket = INVALID_SOCK;
+    }
+    net_cleanup();
+}
+
+/* 온라인 대전 메뉴 */
+void showOnlineMenu(void) {
+    char serverIP[64];
+    int port = DEFAULT_PORT;
+    int c;
+
+    clearScreen();
+    printf("\n======= 온라인 대전 =======\n\n");
+
+    /* 닉네임 입력 */
+    printf("닉네임을 입력하세요: ");
+    fflush(stdout);
+    scanf("%49s", player_nickname);
+    while ((c = getchar()) != '\n' && c != EOF);
+
+    /* 서버 IP 입력 */
+    printf("서버 IP를 입력하세요 (기본값: 127.0.0.1): ");
+    fflush(stdout);
+    if (fgets(serverIP, sizeof(serverIP), stdin) != NULL) {
+        /* 개행 제거 */
+        serverIP[strcspn(serverIP, "\n")] = '\0';
+        if (strlen(serverIP) == 0) {
+            strcpy(serverIP, "127.0.0.1");
+        }
+    } else {
+        strcpy(serverIP, "127.0.0.1");
+    }
+
+    /* 포트 입력 (선택) */
+    printf("포트를 입력하세요 (기본값: %d): ", DEFAULT_PORT);
+    fflush(stdout);
+    {
+        char portStr[16];
+        if (fgets(portStr, sizeof(portStr), stdin) != NULL) {
+            portStr[strcspn(portStr, "\n")] = '\0';
+            if (strlen(portStr) > 0) {
+                int inputPort = atoi(portStr);
+                if (inputPort > 0 && inputPort <= 65535) {
+                    port = inputPort;
+                }
+            }
+        }
+    }
+
+    /* 서버 연결 및 매칭 */
+    if (connectAndMatch(serverIP, port)) {
+        gameMode = 3;
+        networkGameLoop();
+    } else {
+        printf("\n아무 키나 누르면 메뉴로 돌아갑니다...");
+        fflush(stdout);
+        _getch();
     }
 }
 
@@ -1877,7 +2263,11 @@ int main() {
                 }
                 break;
 
-            case 3:  /* 게임 불러오기 */
+            case 3:  /* 온라인 대전 */
+                showOnlineMenu();
+                break;
+
+            case 4:  /* 게임 불러오기 */
                 if (LoadSelectedGame()) {
                     printf("아무 키나 누르면 게임을 시작합니다...");
                     _getch();
@@ -1898,12 +2288,12 @@ int main() {
                 /* 불러오기 실패/취소 시 자동으로 메뉴로 돌아감 */
                 break;
 
-            case 4:  /* 랭킹 확인 */
+            case 5:  /* 랭킹 확인 */
                 print_rankings();
                 /* 랭킹 확인 후 자동으로 메뉴로 돌아감 */
                 break;
 
-            case 5:  /* 종료 */
+            case 6:  /* 종료 */
                 running = 0;
                 break;
 
