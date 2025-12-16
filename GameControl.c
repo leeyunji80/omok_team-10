@@ -514,10 +514,305 @@ MoveResult minimax(int board[BOARD_SIZE][BOARD_SIZE], int depth, int alpha, int 
     return result;
 }
 
+// 기존 열린3 찾기 (이미 보드에 있는 열린 2개 돌 패턴) - 어려움 모드 방어용
+static int findExistingOpenThree(int board[BOARD_SIZE][BOARD_SIZE], int color, Move blocks[], int maxBlocks) {
+    int blockCount = 0;
+
+    // 보드 전체에서 2개 연속 + 양끝 열린 패턴 찾기
+    for (int row = 0; row < BOARD_SIZE && blockCount < maxBlocks; row++) {
+        for (int col = 0; col < BOARD_SIZE && blockCount < maxBlocks; col++) {
+            if (board[row][col] != color) continue;
+
+            for (int dir = 0; dir < 4; dir++) {
+                // 이 방향으로 시작점인지 확인 (중복 방지)
+                int px = col - DX[dir];
+                int py = row - DY[dir];
+                if (px >= 0 && px < BOARD_SIZE && py >= 0 && py < BOARD_SIZE) {
+                    if (board[py][px] == color) continue;
+                }
+
+                // 연속된 돌 세기
+                int count = 1;
+                int nx = col + DX[dir];
+                int ny = row + DY[dir];
+                while (nx >= 0 && nx < BOARD_SIZE && ny >= 0 && ny < BOARD_SIZE && board[ny][nx] == color) {
+                    count++;
+                    nx += DX[dir];
+                    ny += DY[dir];
+                }
+
+                // 2개 연속인 경우 (열린2 -> 열린3이 될 수 있는 패턴)
+                if (count == 2) {
+                    // 양끝 확인
+                    int endX1 = col - DX[dir];
+                    int endY1 = row - DY[dir];
+                    int endX2 = nx;
+                    int endY2 = ny;
+
+                    int open1 = (endX1 >= 0 && endX1 < BOARD_SIZE && endY1 >= 0 && endY1 < BOARD_SIZE && board[endY1][endX1] == EMPTY);
+                    int open2 = (endX2 >= 0 && endX2 < BOARD_SIZE && endY2 >= 0 && endY2 < BOARD_SIZE && board[endY2][endX2] == EMPTY);
+
+                    // 양끝이 모두 열려있고, 한 칸 더 있어서 3개가 될 수 있는 경우
+                    if (open1 && open2) {
+                        // 양쪽 끝 위치를 막아야 할 후보로 추가
+                        // 먼저, 한쪽 끝에서 한 칸 더 갔을 때도 열려있는지 확인 (진짜 열린2)
+                        int ext1X = endX1 - DX[dir];
+                        int ext1Y = endY1 - DY[dir];
+                        int ext2X = endX2 + DX[dir];
+                        int ext2Y = endY2 + DY[dir];
+
+                        int realOpen1 = (ext1X >= 0 && ext1X < BOARD_SIZE && ext1Y >= 0 && ext1Y < BOARD_SIZE && board[ext1Y][ext1X] == EMPTY) ||
+                                        (ext1X < 0 || ext1X >= BOARD_SIZE || ext1Y < 0 || ext1Y >= BOARD_SIZE);
+                        int realOpen2 = (ext2X >= 0 && ext2X < BOARD_SIZE && ext2Y >= 0 && ext2Y < BOARD_SIZE && board[ext2Y][ext2X] == EMPTY) ||
+                                        (ext2X < 0 || ext2X >= BOARD_SIZE || ext2Y < 0 || ext2Y >= BOARD_SIZE);
+
+                        if (realOpen1 || realOpen2) {
+                            // 양 끝 중 하나를 막기
+                            if (blockCount < maxBlocks) {
+                                blocks[blockCount].row = endY1;
+                                blocks[blockCount].col = endX1;
+                                blockCount++;
+                            }
+                            if (blockCount < maxBlocks) {
+                                blocks[blockCount].row = endY2;
+                                blocks[blockCount].col = endX2;
+                                blockCount++;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    return blockCount;
+}
+
+// 열린3 위치 찾기 (앞뒤 뚫린 3개) - 어려움 모드 방어용
+static int findOpenThreePositions(int board[BOARD_SIZE][BOARD_SIZE], int color, Move threats[], int maxThreats) {
+    int threatCount = 0;
+
+    for (int row = 0; row < BOARD_SIZE && threatCount < maxThreats; row++) {
+        for (int col = 0; col < BOARD_SIZE && threatCount < maxThreats; col++) {
+            if (board[row][col] != EMPTY) continue;
+
+            // 이 위치에 돌을 놓았을 때 열린3이 되는지 확인
+            board[row][col] = color;
+
+            for (int dir = 0; dir < 4; dir++) {
+                int count, openEnds;
+                analyzeLine(board, row, col, DX[dir], DY[dir], color, &count, &openEnds);
+
+                if (count == 3 && openEnds == 2) {
+                    // 열린3 발견 - 이 위치를 막아야 함
+                    threats[threatCount].row = row;
+                    threats[threatCount].col = col;
+                    threatCount++;
+                    break;
+                }
+            }
+
+            board[row][col] = EMPTY;
+        }
+    }
+
+    return threatCount;
+}
+
+// 쌍삼(33) 체크 - 금수 확인용
+static int checkDoubleThree(int board[BOARD_SIZE][BOARD_SIZE], int row, int col, int color) {
+    if (board[row][col] != EMPTY) return 0;
+
+    int openThrees = 0;
+    board[row][col] = color;
+
+    for (int dir = 0; dir < 4; dir++) {
+        int count, openEnds;
+        analyzeLine(board, row, col, DX[dir], DY[dir], color, &count, &openEnds);
+        if (count == 3 && openEnds == 2) {
+            openThrees++;
+        }
+    }
+
+    board[row][col] = EMPTY;
+    return openThrees >= 2;
+}
+
+// 어려움 모드 전용 최적 착수 찾기
+static Move findBestMoveHard(int board[BOARD_SIZE][BOARD_SIZE], int aiColor) {
+    int opponent = (aiColor == BLACK) ? WHITE : BLACK;
+
+    Move moves[MAX_MOVES];
+    int moveCount = getPossibleMoves(board, moves, MAX_MOVES);
+
+    if (moveCount == 0) {
+        Move center = { BOARD_SIZE / 2, BOARD_SIZE / 2 };
+        return center;
+    }
+
+    // === 1단계: 즉시 승리 ===
+    for (int i = 0; i < moveCount; i++) {
+        int score = evaluatePosition(board, moves[i].row, moves[i].col, aiColor);
+        if (score >= SCORE_FIVE) {
+            return moves[i];
+        }
+    }
+
+    // === 2단계: 상대 즉시 승리 방어 (5목 방어) ===
+    for (int i = 0; i < moveCount; i++) {
+        int score = evaluatePosition(board, moves[i].row, moves[i].col, opponent);
+        if (score >= SCORE_FIVE) {
+            return moves[i];
+        }
+    }
+
+    // === 3단계: 열린4 공격 (승리 확정) ===
+    for (int i = 0; i < moveCount; i++) {
+        int score = evaluatePosition(board, moves[i].row, moves[i].col, aiColor);
+        if (score >= SCORE_OPEN_FOUR) {
+            // 쌍삼(33) 금수가 아닌지 확인
+            if (!checkDoubleThree(board, moves[i].row, moves[i].col, aiColor)) {
+                return moves[i];
+            }
+        }
+    }
+
+    // === 4단계: 상대 열린4 방어 (필수 방어) ===
+    for (int i = 0; i < moveCount; i++) {
+        int score = evaluatePosition(board, moves[i].row, moves[i].col, opponent);
+        if (score >= SCORE_OPEN_FOUR) {
+            return moves[i];
+        }
+    }
+
+    // === 5단계: 상대 닫힌4 방어 ===
+    for (int i = 0; i < moveCount; i++) {
+        int score = evaluatePosition(board, moves[i].row, moves[i].col, opponent);
+        if (score >= SCORE_FOUR) {
+            return moves[i];
+        }
+    }
+
+    // === 6단계: 상대 열린3 방어 (핵심! 앞뒤 뚫린 3개 무조건 막기) ===
+    // 먼저, 상대방이 이미 열린2를 가지고 있고 열린3으로 확장 가능한 경우 탐지
+    Move existingThreats[50];
+    int existingCount = findExistingOpenThree(board, opponent, existingThreats, 50);
+
+    // 상대방이 다음 턴에 열린3을 만들 수 있는 위치 찾기
+    Move opponentThreats[50];
+    int threatCount = findOpenThreePositions(board, opponent, opponentThreats, 50);
+
+    // 모든 위협을 합치기 (기존 열린2 + 열린3 가능 위치)
+    Move allThreats[100];
+    int allThreatCount = 0;
+
+    for (int i = 0; i < existingCount && allThreatCount < 100; i++) {
+        allThreats[allThreatCount++] = existingThreats[i];
+    }
+    for (int i = 0; i < threatCount && allThreatCount < 100; i++) {
+        // 중복 제거
+        int isDup = 0;
+        for (int j = 0; j < allThreatCount; j++) {
+            if (allThreats[j].row == opponentThreats[i].row && allThreats[j].col == opponentThreats[i].col) {
+                isDup = 1;
+                break;
+            }
+        }
+        if (!isDup) {
+            allThreats[allThreatCount++] = opponentThreats[i];
+        }
+    }
+
+    if (allThreatCount > 0) {
+        // 가장 위험한 위치 막기 (여러 개면 중앙에 가까운 것 + 공격도 되는 것 우선)
+        int bestThreatIdx = 0;
+        int bestScore = 0;
+
+        for (int i = 0; i < allThreatCount; i++) {
+            int weight = positionWeight[allThreats[i].row][allThreats[i].col];
+            int attackScore = evaluatePosition(board, allThreats[i].row, allThreats[i].col, aiColor);
+            int totalScore = weight + attackScore;
+
+            if (totalScore > bestScore) {
+                bestScore = totalScore;
+                bestThreatIdx = i;
+            }
+        }
+
+        // 더 좋은 공격 수가 없으면 방어
+        int hasBetterAttack = 0;
+        for (int i = 0; i < moveCount; i++) {
+            int attackScore = evaluatePosition(board, moves[i].row, moves[i].col, aiColor);
+            if (attackScore >= SCORE_OPEN_FOUR) {
+                hasBetterAttack = 1;
+                return moves[i];
+            }
+        }
+
+        if (!hasBetterAttack) {
+            return allThreats[bestThreatIdx];
+        }
+    }
+
+    // === 7단계: 사삼 공격 (4+열린3) ===
+    for (int i = 0; i < moveCount; i++) {
+        board[moves[i].row][moves[i].col] = aiColor;
+
+        int fours = 0, openThrees = 0;
+        for (int dir = 0; dir < 4; dir++) {
+            int count, openEnds;
+            analyzeLine(board, moves[i].row, moves[i].col, DX[dir], DY[dir], aiColor, &count, &openEnds);
+            if (count == 4) fours++;
+            if (count == 3 && openEnds == 2) openThrees++;
+        }
+
+        board[moves[i].row][moves[i].col] = EMPTY;
+
+        if (fours >= 1 && openThrees >= 1) {
+            if (!checkDoubleThree(board, moves[i].row, moves[i].col, aiColor)) {
+                return moves[i];
+            }
+        }
+    }
+
+    // === 8단계: 열린3 공격 ===
+    int bestAttackIdx = -1;
+    int bestAttackScore = 0;
+    for (int i = 0; i < moveCount; i++) {
+        if (checkDoubleThree(board, moves[i].row, moves[i].col, aiColor)) continue;
+
+        int score = evaluatePosition(board, moves[i].row, moves[i].col, aiColor);
+        if (score > bestAttackScore) {
+            bestAttackScore = score;
+            bestAttackIdx = i;
+        }
+    }
+
+    if (bestAttackScore >= SCORE_OPEN_THREE && bestAttackIdx >= 0) {
+        return moves[bestAttackIdx];
+    }
+
+    // === 9단계: 깊은 Minimax 탐색 (깊이 8) ===
+    MoveResult result = minimax(board, 8, -INFINITY_SCORE, INFINITY_SCORE, 1, aiColor);
+
+    if (result.row >= 0 && result.col >= 0) {
+        Move bestMove = { result.row, result.col };
+        return bestMove;
+    }
+
+    // 예외: 첫 번째 후보
+    return moves[0];
+}
+
 // AI 최적 착수 찾기
 Move findBestMove(int board[BOARD_SIZE][BOARD_SIZE], int aiColor, int difficulty) {
     if (!initialized) {
         initAI();
+    }
+
+    // 어려움 모드는 전용 함수 사용
+    if (difficulty == HARD) {
+        return findBestMoveHard(board, aiColor);
     }
 
     int opponent = (aiColor == BLACK) ? WHITE : BLACK;
@@ -627,11 +922,8 @@ Move findBestMove(int board[BOARD_SIZE][BOARD_SIZE], int aiColor, int difficulty
         }
         break;
     case MEDIUM:
-        depth = 4;
-        break;
-    case HARD:
     default:
-        depth = 6;
+        depth = 4;
         break;
     }
 
@@ -1672,20 +1964,94 @@ void gameLoop() {
         }
 
          int key = -1;
-if (gameMode == 2) {
-
+if (gameMode == 1) {
+    // 1인용 AI 모드: 플레이어 턴 10초 제한, 타임아웃 시 랜덤 착수
     if (!turnActive) {
-	playerTurnStart = GetTickCount();
-    turnActive = 1;
+        playerTurnStart = GetTickCount();
+        turnActive = 1;
+    }
+    int timed_out = 0;
+    printBoard(-1);
+
+    while (1) {
+        DWORD now = GetTickCount();
+        int remain = 10 - (now - playerTurnStart) / 1000;
+        if (remain < 0) remain = 0;
+
+        printRemainTime(remain);
+
+        if (_kbhit()) {
+            key = _getch();
+            break;
+        }
+        if (remain == 0) {
+            timed_out = 1;
+            break;
+        }
+
+        Sleep(50);
+    }
+
+    if (timed_out) {
+        // 랜덤 빈 위치에 착수
+        int emptySpots[SIZE * SIZE][2];
+        int emptyCount = 0;
+        for (int y = 0; y < SIZE; y++) {
+            for (int x = 0; x < SIZE; x++) {
+                if (board[y][x] == EMPTY) {
+                    emptySpots[emptyCount][0] = x;
+                    emptySpots[emptyCount][1] = y;
+                    emptyCount++;
+                }
+            }
+        }
+        if (emptyCount > 0) {
+            int randIdx = rand() % emptyCount;
+            int randX = emptySpots[randIdx][0];
+            int randY = emptySpots[randIdx][1];
+            cursorX = randX;
+            cursorY = randY;
+            printBoard(-1);
+            printTemporaryMessage("시간 초과! 랜덤 착수합니다.", 1);
+            placeStone(randX, randY);
+            turnActive = 0;
+            printBoard(-1);
+            int winner = checkWinGameplay(lastMoveX, lastMoveY);
+            if (winner != 0) {
+                gameEndedByVictory = 1;
+                hideCursor(0);
+                printf("%s 승리! 게임이 종료되었습니다.\n", (winner == BLACK) ? "흑" : "백");
+                if (winner == BLACK) {
+                    fflush(stdin);
+                    while(1){
+                        printf("\n닉네임을 입력하세요(15자 이내):");
+                        scanf("%s", player_nickname);
+                        if(strlen(player_nickname)>15){
+                            printf("닉네임이 너무 깁니다.\n");
+                            _getch();
+                            printf("\x1b[1F\x1b[2K\x1b[1F\x1b[2K\x1b[1F\x1b[2K");
+                        }
+                        else break;
+                    }
+                    update_game_result(player_nickname, 1, 1, difficulty);
+                }
+                break;
+            }
+        }
+        continue;
+    }
 }
-     DWORD start = GetTickCount();
-     int timed_out = 0;
-     printBoard(-1);
+else if (gameMode == 2) {
+    // 2인용 모드: 시간제한 + 턴 넘기기
+    if (!turnActive) {
+        playerTurnStart = GetTickCount();
+        turnActive = 1;
+    }
+    int timed_out = 0;
+    printBoard(-1);
 
-         while (1) {
-
-        // 경과 시간 계산
-         DWORD now = GetTickCount();
+    while (1) {
+        DWORD now = GetTickCount();
         int remain = 10 - (now - playerTurnStart) / 1000;
         if (remain < 0) remain = 0;
 
@@ -1705,16 +2071,15 @@ if (gameMode == 2) {
 
     if (timed_out) {
         printBoard(0);
-       printTemporaryMessage("시간 초과! 턴이 넘어갑니다.", 1); // 1초 표시 후 지움
+        printTemporaryMessage("시간 초과! 턴이 넘어갑니다.", 1);
         currentPlayer = (currentPlayer == BLACK) ? WHITE : BLACK;
         turnActive = 0;
         Sleep(500);
         continue;
     }
 }
-
- else {
-     // 1인용은 기존 방식 유지
+else {
+     // 기타 모드
      printBoard(-1);
      key = _getch();
  }
