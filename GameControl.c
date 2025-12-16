@@ -747,39 +747,25 @@ static Move findBestMoveHard(int board[BOARD_SIZE][BOARD_SIZE], int aiColor) {
         return center;
     }
 
-    // === 0단계: 상대방의 4개 이상 연속 직접 탐지 및 방어 ===
-    Move urgentBlocks[20];
-    int urgentCount = findBlockingMoves(board, opponent, urgentBlocks, 20);
+    // ★★★ 최우선: 내가 5목을 만들 수 있으면 무조건 승리! ★★★
+    for (int i = 0; i < allMoveCount; i++) {
+        board[allMoves[i].row][allMoves[i].col] = aiColor;
+        int canWin = checkWinBoard(board, allMoves[i].row, allMoves[i].col, aiColor);
+        board[allMoves[i].row][allMoves[i].col] = EMPTY;
 
-    // 4개 이상 연속 방어가 최우선
-    for (int i = 0; i < urgentCount; i++) {
-        int blockRow = urgentBlocks[i].row;
-        int blockCol = urgentBlocks[i].col;
-        if (board[blockRow][blockCol] == EMPTY) {
-            board[blockRow][blockCol] = opponent;
-            int wouldWin = checkWinBoard(board, blockRow, blockCol, opponent);
-            board[blockRow][blockCol] = EMPTY;
-
-            if (wouldWin) {
-                Move block = { blockRow, blockCol };
-                return block;
-            }
+        if (canWin) {
+            return allMoves[i];  // 즉시 승리!
         }
     }
 
-    // === 1단계: 즉시 승리 - 전체 보드 스캔 ===
+    // === 1단계: 상대 즉시 승리 방어 (상대가 5목 만들 수 있는 곳 막기) ===
     for (int i = 0; i < allMoveCount; i++) {
-        int score = evaluatePosition(board, allMoves[i].row, allMoves[i].col, aiColor);
-        if (score >= SCORE_FIVE) {
-            return allMoves[i];
-        }
-    }
+        board[allMoves[i].row][allMoves[i].col] = opponent;
+        int opponentWins = checkWinBoard(board, allMoves[i].row, allMoves[i].col, opponent);
+        board[allMoves[i].row][allMoves[i].col] = EMPTY;
 
-    // === 2단계: 상대 즉시 승리 방어 (5목 방어) - 전체 보드 스캔 ===
-    for (int i = 0; i < allMoveCount; i++) {
-        int score = evaluatePosition(board, allMoves[i].row, allMoves[i].col, opponent);
-        if (score >= SCORE_FIVE) {
-            return allMoves[i];
+        if (opponentWins) {
+            return allMoves[i];  // 막아야 함
         }
     }
 
