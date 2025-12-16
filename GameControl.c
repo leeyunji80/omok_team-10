@@ -638,170 +638,255 @@ static int checkDoubleThree(int board[BOARD_SIZE][BOARD_SIZE], int row, int col,
     return openThrees >= 2;
 }
 
-// 어려움 모드 전용 최적 착수 찾기
+// 상대방의 연속된 돌(3개 이상)을 찾아서 막아야 할 위치 반환
+static int findBlockingMoves(int board[BOARD_SIZE][BOARD_SIZE], int color, Move blocks[], int maxBlocks) {
+    int blockCount = 0;
+
+    for (int row = 0; row < BOARD_SIZE && blockCount < maxBlocks; row++) {
+        for (int col = 0; col < BOARD_SIZE && blockCount < maxBlocks; col++) {
+            if (board[row][col] != color) continue;
+
+            for (int dir = 0; dir < 4; dir++) {
+                // 시작점인지 확인 (중복 방지)
+                int px = col - DX[dir];
+                int py = row - DY[dir];
+                if (px >= 0 && px < BOARD_SIZE && py >= 0 && py < BOARD_SIZE) {
+                    if (board[py][px] == color) continue;
+                }
+
+                // 연속된 돌 세기
+                int count = 1;
+                int nx = col + DX[dir];
+                int ny = row + DY[dir];
+                while (nx >= 0 && nx < BOARD_SIZE && ny >= 0 && ny < BOARD_SIZE && board[ny][nx] == color) {
+                    count++;
+                    nx += DX[dir];
+                    ny += DY[dir];
+                }
+
+                // 4개 이상 연속이면 양 끝을 막아야 함
+                if (count >= 4) {
+                    // 앞쪽 끝 (시작점 전)
+                    int frontX = col - DX[dir];
+                    int frontY = row - DY[dir];
+                    if (frontX >= 0 && frontX < BOARD_SIZE && frontY >= 0 && frontY < BOARD_SIZE) {
+                        if (board[frontY][frontX] == EMPTY && blockCount < maxBlocks) {
+                            blocks[blockCount].row = frontY;
+                            blocks[blockCount].col = frontX;
+                            blockCount++;
+                        }
+                    }
+                    // 뒤쪽 끝
+                    if (nx >= 0 && nx < BOARD_SIZE && ny >= 0 && ny < BOARD_SIZE) {
+                        if (board[ny][nx] == EMPTY && blockCount < maxBlocks) {
+                            blocks[blockCount].row = ny;
+                            blocks[blockCount].col = nx;
+                            blockCount++;
+                        }
+                    }
+                }
+                // 3개 연속 + 양쪽 열림 (열린3)
+                else if (count == 3) {
+                    int frontX = col - DX[dir];
+                    int frontY = row - DY[dir];
+                    int frontOpen = (frontX >= 0 && frontX < BOARD_SIZE && frontY >= 0 && frontY < BOARD_SIZE && board[frontY][frontX] == EMPTY);
+                    int backOpen = (nx >= 0 && nx < BOARD_SIZE && ny >= 0 && ny < BOARD_SIZE && board[ny][nx] == EMPTY);
+
+                    if (frontOpen && backOpen) {
+                        // 열린3 - 양쪽 중 하나를 막아야 함
+                        if (blockCount < maxBlocks) {
+                            blocks[blockCount].row = frontY;
+                            blocks[blockCount].col = frontX;
+                            blockCount++;
+                        }
+                        if (blockCount < maxBlocks) {
+                            blocks[blockCount].row = ny;
+                            blocks[blockCount].col = nx;
+                            blockCount++;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    return blockCount;
+}
+
+// 전체 보드에서 모든 빈 칸을 후보로 가져오기 (어려움 모드용)
+static int getAllEmptyPositions(int board[BOARD_SIZE][BOARD_SIZE], Move moves[]) {
+    int count = 0;
+    for (int row = 0; row < BOARD_SIZE; row++) {
+        for (int col = 0; col < BOARD_SIZE; col++) {
+            if (board[row][col] == EMPTY) {
+                moves[count].row = row;
+                moves[count].col = col;
+                count++;
+            }
+        }
+    }
+    return count;
+}
+
+// 어려움 모드 전용 최적 착수 찾기 - 전체 보드 탐색
 static Move findBestMoveHard(int board[BOARD_SIZE][BOARD_SIZE], int aiColor) {
     int opponent = (aiColor == BLACK) ? WHITE : BLACK;
 
-    Move moves[MAX_MOVES];
-    int moveCount = getPossibleMoves(board, moves, MAX_MOVES);
+    // 전체 빈 칸을 후보로 사용
+    Move allMoves[BOARD_SIZE * BOARD_SIZE];
+    int allMoveCount = getAllEmptyPositions(board, allMoves);
 
-    if (moveCount == 0) {
+    if (allMoveCount == 0) {
         Move center = { BOARD_SIZE / 2, BOARD_SIZE / 2 };
         return center;
     }
 
-    // === 1단계: 즉시 승리 ===
-    for (int i = 0; i < moveCount; i++) {
-        int score = evaluatePosition(board, moves[i].row, moves[i].col, aiColor);
-        if (score >= SCORE_FIVE) {
-            return moves[i];
-        }
+    // 첫 수는 중앙
+    if (allMoveCount == BOARD_SIZE * BOARD_SIZE) {
+        Move center = { BOARD_SIZE / 2, BOARD_SIZE / 2 };
+        return center;
     }
 
-    // === 2단계: 상대 즉시 승리 방어 (5목 방어) ===
-    for (int i = 0; i < moveCount; i++) {
-        int score = evaluatePosition(board, moves[i].row, moves[i].col, opponent);
-        if (score >= SCORE_FIVE) {
-            return moves[i];
-        }
-    }
+    // === 0단계: 상대방의 4개 이상 연속 직접 탐지 및 방어 ===
+    Move urgentBlocks[20];
+    int urgentCount = findBlockingMoves(board, opponent, urgentBlocks, 20);
 
-    // === 3단계: 열린4 공격 (승리 확정) ===
-    for (int i = 0; i < moveCount; i++) {
-        int score = evaluatePosition(board, moves[i].row, moves[i].col, aiColor);
-        if (score >= SCORE_OPEN_FOUR) {
-            // 쌍삼(33) 금수가 아닌지 확인
-            if (!checkDoubleThree(board, moves[i].row, moves[i].col, aiColor)) {
-                return moves[i];
+    // 4개 이상 연속 방어가 최우선
+    for (int i = 0; i < urgentCount; i++) {
+        int blockRow = urgentBlocks[i].row;
+        int blockCol = urgentBlocks[i].col;
+        if (board[blockRow][blockCol] == EMPTY) {
+            board[blockRow][blockCol] = opponent;
+            int wouldWin = checkWinBoard(board, blockRow, blockCol, opponent);
+            board[blockRow][blockCol] = EMPTY;
+
+            if (wouldWin) {
+                Move block = { blockRow, blockCol };
+                return block;
             }
         }
     }
 
-    // === 4단계: 상대 열린4 방어 (필수 방어) ===
-    for (int i = 0; i < moveCount; i++) {
-        int score = evaluatePosition(board, moves[i].row, moves[i].col, opponent);
-        if (score >= SCORE_OPEN_FOUR) {
-            return moves[i];
+    // === 1단계: 즉시 승리 - 전체 보드 스캔 ===
+    for (int i = 0; i < allMoveCount; i++) {
+        int score = evaluatePosition(board, allMoves[i].row, allMoves[i].col, aiColor);
+        if (score >= SCORE_FIVE) {
+            return allMoves[i];
         }
     }
 
-    // === 5단계: 상대 닫힌4 방어 ===
-    for (int i = 0; i < moveCount; i++) {
-        int score = evaluatePosition(board, moves[i].row, moves[i].col, opponent);
+    // === 2단계: 상대 즉시 승리 방어 (5목 방어) - 전체 보드 스캔 ===
+    for (int i = 0; i < allMoveCount; i++) {
+        int score = evaluatePosition(board, allMoves[i].row, allMoves[i].col, opponent);
+        if (score >= SCORE_FIVE) {
+            return allMoves[i];
+        }
+    }
+
+    // === 3단계: 열린4 공격 (승리 확정) - 전체 보드 스캔 ===
+    for (int i = 0; i < allMoveCount; i++) {
+        int score = evaluatePosition(board, allMoves[i].row, allMoves[i].col, aiColor);
+        if (score >= SCORE_OPEN_FOUR) {
+            if (!checkDoubleThree(board, allMoves[i].row, allMoves[i].col, aiColor)) {
+                return allMoves[i];
+            }
+        }
+    }
+
+    // === 4단계: 상대 열린4 방어 (필수 방어) - 전체 보드 스캔 ===
+    for (int i = 0; i < allMoveCount; i++) {
+        int score = evaluatePosition(board, allMoves[i].row, allMoves[i].col, opponent);
+        if (score >= SCORE_OPEN_FOUR) {
+            return allMoves[i];
+        }
+    }
+
+    // === 5단계: 상대 닫힌4 방어 - 전체 보드 스캔 ===
+    for (int i = 0; i < allMoveCount; i++) {
+        int score = evaluatePosition(board, allMoves[i].row, allMoves[i].col, opponent);
         if (score >= SCORE_FOUR) {
-            return moves[i];
+            return allMoves[i];
         }
     }
 
-    // === 6단계: 상대 열린3 방어 (핵심! 앞뒤 뚫린 3개 무조건 막기) ===
-    // 먼저, 상대방이 이미 열린2를 가지고 있고 열린3으로 확장 가능한 경우 탐지
-    Move existingThreats[50];
-    int existingCount = findExistingOpenThree(board, opponent, existingThreats, 50);
-
-    // 상대방이 다음 턴에 열린3을 만들 수 있는 위치 찾기
-    Move opponentThreats[50];
-    int threatCount = findOpenThreePositions(board, opponent, opponentThreats, 50);
-
-    // 모든 위협을 합치기 (기존 열린2 + 열린3 가능 위치)
-    Move allThreats[100];
-    int allThreatCount = 0;
-
-    for (int i = 0; i < existingCount && allThreatCount < 100; i++) {
-        allThreats[allThreatCount++] = existingThreats[i];
-    }
-    for (int i = 0; i < threatCount && allThreatCount < 100; i++) {
-        // 중복 제거
-        int isDup = 0;
-        for (int j = 0; j < allThreatCount; j++) {
-            if (allThreats[j].row == opponentThreats[i].row && allThreats[j].col == opponentThreats[i].col) {
-                isDup = 1;
-                break;
-            }
-        }
-        if (!isDup) {
-            allThreats[allThreatCount++] = opponentThreats[i];
+    // === 6단계: 상대 열린3 방어 - 전체 보드 스캔 ===
+    int bestDefenseIdx = -1;
+    int bestDefenseScore = 0;
+    for (int i = 0; i < allMoveCount; i++) {
+        int score = evaluatePosition(board, allMoves[i].row, allMoves[i].col, opponent);
+        if (score >= SCORE_OPEN_THREE && score > bestDefenseScore) {
+            bestDefenseScore = score;
+            bestDefenseIdx = i;
         }
     }
 
-    if (allThreatCount > 0) {
-        // 가장 위험한 위치 막기 (여러 개면 중앙에 가까운 것 + 공격도 되는 것 우선)
-        int bestThreatIdx = 0;
-        int bestScore = 0;
+    // === 7단계: 사삼 공격 (4+열린3) - 전체 보드 스캔 ===
+    for (int i = 0; i < allMoveCount; i++) {
+        if (checkDoubleThree(board, allMoves[i].row, allMoves[i].col, aiColor)) continue;
 
-        for (int i = 0; i < allThreatCount; i++) {
-            int weight = positionWeight[allThreats[i].row][allThreats[i].col];
-            int attackScore = evaluatePosition(board, allThreats[i].row, allThreats[i].col, aiColor);
-            int totalScore = weight + attackScore;
-
-            if (totalScore > bestScore) {
-                bestScore = totalScore;
-                bestThreatIdx = i;
-            }
-        }
-
-        // 더 좋은 공격 수가 없으면 방어
-        int hasBetterAttack = 0;
-        for (int i = 0; i < moveCount; i++) {
-            int attackScore = evaluatePosition(board, moves[i].row, moves[i].col, aiColor);
-            if (attackScore >= SCORE_OPEN_FOUR) {
-                hasBetterAttack = 1;
-                return moves[i];
-            }
-        }
-
-        if (!hasBetterAttack) {
-            return allThreats[bestThreatIdx];
-        }
-    }
-
-    // === 7단계: 사삼 공격 (4+열린3) ===
-    for (int i = 0; i < moveCount; i++) {
-        board[moves[i].row][moves[i].col] = aiColor;
+        board[allMoves[i].row][allMoves[i].col] = aiColor;
 
         int fours = 0, openThrees = 0;
         for (int dir = 0; dir < 4; dir++) {
             int count, openEnds;
-            analyzeLine(board, moves[i].row, moves[i].col, DX[dir], DY[dir], aiColor, &count, &openEnds);
+            analyzeLine(board, allMoves[i].row, allMoves[i].col, DX[dir], DY[dir], aiColor, &count, &openEnds);
             if (count == 4) fours++;
             if (count == 3 && openEnds == 2) openThrees++;
         }
 
-        board[moves[i].row][moves[i].col] = EMPTY;
+        board[allMoves[i].row][allMoves[i].col] = EMPTY;
 
         if (fours >= 1 && openThrees >= 1) {
-            if (!checkDoubleThree(board, moves[i].row, moves[i].col, aiColor)) {
-                return moves[i];
-            }
+            return allMoves[i];
         }
     }
 
-    // === 8단계: 열린3 공격 ===
+    // === 8단계: 열린3 공격 vs 상대 열린3 방어 ===
     int bestAttackIdx = -1;
     int bestAttackScore = 0;
-    for (int i = 0; i < moveCount; i++) {
-        if (checkDoubleThree(board, moves[i].row, moves[i].col, aiColor)) continue;
+    for (int i = 0; i < allMoveCount; i++) {
+        if (checkDoubleThree(board, allMoves[i].row, allMoves[i].col, aiColor)) continue;
 
-        int score = evaluatePosition(board, moves[i].row, moves[i].col, aiColor);
+        int score = evaluatePosition(board, allMoves[i].row, allMoves[i].col, aiColor);
         if (score > bestAttackScore) {
             bestAttackScore = score;
             bestAttackIdx = i;
         }
     }
 
+    // 상대 열린3 방어가 더 급하면 방어
+    if (bestDefenseScore >= SCORE_OPEN_THREE) {
+        // 하지만 내가 열린4 이상 만들 수 있으면 공격
+        if (bestAttackScore >= SCORE_OPEN_FOUR && bestAttackIdx >= 0) {
+            return allMoves[bestAttackIdx];
+        }
+        return allMoves[bestDefenseIdx];
+    }
+
+    // 열린3 공격
     if (bestAttackScore >= SCORE_OPEN_THREE && bestAttackIdx >= 0) {
-        return moves[bestAttackIdx];
+        return allMoves[bestAttackIdx];
     }
 
-    // === 9단계: 깊은 Minimax 탐색 (깊이 8) ===
-    MoveResult result = minimax(board, 8, -INFINITY_SCORE, INFINITY_SCORE, 1, aiColor);
+    // === 9단계: 전체 보드에서 최고 점수 위치 찾기 ===
+    int bestIdx = 0;
+    int bestTotalScore = -INFINITY_SCORE;
 
-    if (result.row >= 0 && result.col >= 0) {
-        Move bestMove = { result.row, result.col };
-        return bestMove;
+    for (int i = 0; i < allMoveCount; i++) {
+        int attackScore = evaluatePosition(board, allMoves[i].row, allMoves[i].col, aiColor);
+        int defenseScore = evaluatePosition(board, allMoves[i].row, allMoves[i].col, opponent);
+        int posWeight = positionWeight[allMoves[i].row][allMoves[i].col];
+
+        // 공격 + 방어 + 위치 가중치
+        int totalScore = attackScore * 2 + defenseScore + posWeight;
+
+        if (totalScore > bestTotalScore) {
+            bestTotalScore = totalScore;
+            bestIdx = i;
+        }
     }
 
-    // 예외: 첫 번째 후보
-    return moves[0];
+    return allMoves[bestIdx];
 }
 
 // AI 최적 착수 찾기
