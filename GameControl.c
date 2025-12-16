@@ -2146,6 +2146,7 @@ void networkGameLoop(void) {
     NetMessage response;
     int key;
     int result;
+    int needRedraw = 1;  /* 화면 갱신 필요 여부 */
 
     networkGameOver = 0;
     initBoard();
@@ -2155,7 +2156,11 @@ void networkGameLoop(void) {
     hideCursor(1);
 
     while (!networkGameOver) {
-        printNetworkBoard();
+        /* 변경이 있을 때만 화면 갱신 */
+        if (needRedraw) {
+            printNetworkBoard();
+            needRedraw = 0;
+        }
 
         if (isMyTurn) {
             /* 내 턴: 입력 처리 */
@@ -2164,16 +2169,16 @@ void networkGameLoop(void) {
 
                 switch (key) {
                     case 'w': case 'W':
-                        if (cursorY > 0) cursorY--;
+                        if (cursorY > 0) { cursorY--; needRedraw = 1; }
                         break;
                     case 's': case 'S':
-                        if (cursorY < SIZE - 1) cursorY++;
+                        if (cursorY < SIZE - 1) { cursorY++; needRedraw = 1; }
                         break;
                     case 'a': case 'A':
-                        if (cursorX > 0) cursorX--;
+                        if (cursorX > 0) { cursorX--; needRedraw = 1; }
                         break;
                     case 'd': case 'D':
-                        if (cursorX < SIZE - 1) cursorX++;
+                        if (cursorX < SIZE - 1) { cursorX++; needRedraw = 1; }
                         break;
                     case 'b': case 'B':
                         /* 착수 시도 */
@@ -2199,9 +2204,11 @@ void networkGameLoop(void) {
                                 lastMoveX = cursorX;
                                 lastMoveY = cursorY;
                                 isMyTurn = 0;
+                                needRedraw = 1;
                             } else if (response.type == MSG_ERROR) {
                                 printf("\n착수 실패: %s\n", response.message);
                                 Sleep(1000);
+                                needRedraw = 1;
                             } else if (response.type == MSG_GAME_END) {
                                 /* 내가 승리 */
                                 board[cursorY][cursorX] = myColor;
@@ -2243,6 +2250,7 @@ void networkGameLoop(void) {
                     lastMoveX = response.x;
                     lastMoveY = response.y;
                     isMyTurn = 1;
+                    needRedraw = 1;
                     break;
 
                 case MSG_GAME_END:
